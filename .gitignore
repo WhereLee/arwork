@@ -74,3 +74,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 *.log
+
+# 仓库根目录的临时截图（诊断 / 预览用），不进库
+/*.png
