@@ -55,6 +55,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# ---------- 本地协作笔记（保留在本地，不入库） ----------
+/git与CI操作手册.md
+/Unity安装手册.md
+
 # ---------- 编辑器 / IDE ----------
 .vs/
 .idea/
