@@ -204,6 +204,7 @@ public class IssueForm : MonoBehaviour
 
         yield return ApiClient.CreateIssue(
             baseUrl,
+            Session.Token,
             title,
             descriptionInput != null && descriptionInput.text != null ? descriptionInput.text : string.Empty,
             _priority,

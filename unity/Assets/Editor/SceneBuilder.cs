@@ -29,6 +29,8 @@ public static class SceneBuilder
     private sealed class UIRefs
     {
         public GameObject guidePanel;
+        public Text accountText;
+        public Button openListButton;
         public Button horizontalButton;
         public Button verticalButton;
 
@@ -43,6 +45,8 @@ public static class SceneBuilder
         public Button confirmYesButton;
         public Button confirmNoButton;
 
+        public LoginForm loginForm;
+        public IssueListPanel listPanel;
         public IssueForm form;
     }
 
@@ -594,6 +598,10 @@ public static class SceneBuilder
         flow.hudVerticalButton = ui.hudVerticalButton;
         flow.confirmYesButton = ui.confirmYesButton;
         flow.confirmNoButton = ui.confirmNoButton;
+        flow.openListButton = ui.openListButton;
+        flow.accountText = ui.accountText;
+        flow.loginForm = ui.loginForm;
+        flow.listPanel = ui.listPanel;
 
         placer.flow = flow;
 
@@ -629,9 +637,12 @@ public static class SceneBuilder
     {
         var refs = new UIRefs();
 
+        // 建得越晚越靠上层；登录页打底，表单压在最上
+        refs.loginForm = CreateLoginPanel(canvas);
         refs.guidePanel = CreateGuidePanel(canvas, refs);
         refs.hudPanel = CreateHudPanel(canvas, refs);
         refs.confirmPanel = CreateConfirmPanel(canvas, refs);
+        refs.listPanel = CreateIssueListPanel(canvas);
         refs.form = CreateFormPanel(canvas);
 
         return refs;
@@ -641,12 +652,33 @@ public static class SceneBuilder
     {
         GameObject panel = CreateFullScreenPanel(canvas, "Guide", new Color(0.04f, 0.06f, 0.09f, 0.98f), false);
 
+        // 顶部一行：左边当前账号，右边「我的上报」
+        refs.accountText = CreateText(panel.transform, string.Empty, 30, false);
+        var accountRect = refs.accountText.rectTransform;
+        accountRect.anchorMin = new Vector2(0f, 1f);
+        accountRect.anchorMax = new Vector2(0f, 1f);
+        accountRect.pivot = new Vector2(0f, 1f);
+        accountRect.anchoredPosition = new Vector2(44f, -40f);
+        accountRect.sizeDelta = new Vector2(620f, 60f);
+        refs.accountText.alignment = TextAnchor.MiddleLeft;
+        refs.accountText.color = new Color(0.68f, 0.74f, 0.82f);
+
+        refs.openListButton = CreateFixedButton(
+            panel.transform, "我的上报",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
+            new Vector2(240f, 84f), new Color(0.22f, 0.25f, 0.31f, 0.95f));
+
         Text title = CreateText(panel.transform, "园区巡检 AR", 56, false);
         SetTopStretch(title.rectTransform, -240f, 120f);
         title.fontStyle = FontStyle.Bold;
 
         Text steps = CreateText(panel.transform, string.Empty, 34, false);
-        SetTopStretch(steps.rectTransform, -400f, 420f);
+        var stepsRect = steps.rectTransform;
+        stepsRect.anchorMin = new Vector2(0f, 1f);
+        stepsRect.anchorMax = new Vector2(1f, 1f);
+        stepsRect.pivot = new Vector2(0.5f, 1f);
+        stepsRect.anchoredPosition = new Vector2(0f, -400f);
+        stepsRect.sizeDelta = new Vector2(-160f, 420f);
         steps.alignment = TextAnchor.UpperLeft;
         steps.lineSpacing = 1.6f;
         steps.color = new Color(0.78f, 0.84f, 0.92f);
@@ -733,7 +765,7 @@ public static class SceneBuilder
         boxRect.sizeDelta = new Vector2(820f, 440f);
 
         var boxImage = boxObject.AddComponent<Image>();
-        boxImage.color = new Color(0.1f, 0.12f, 0.16f, 1f);
+        ApplyRoundedBackground(boxImage, new Color(0.1f, 0.12f, 0.16f, 1f));
 
         Text message = CreateText(boxObject.transform, "退出会清空本轮所有标记\n确定要退出吗？", 34, false);
         SetTopStretch(message.rectTransform, -70f, 190f);
@@ -757,6 +789,220 @@ public static class SceneBuilder
         return panel;
     }
 
+    /// <summary>
+    /// 登录页：居中卡片 + 账号 / 密码 / 服务器地址。
+    /// 服务器地址放在登录页，因为换网络后第一个要失败的就是登录请求。
+    /// </summary>
+    private static LoginForm CreateLoginPanel(Transform canvas)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "Login", new Color(0.04f, 0.06f, 0.09f, 1f), true);
+
+        var card = new GameObject("Card", typeof(RectTransform));
+        card.transform.SetParent(panel.transform, false);
+
+        var cardRect = card.GetComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(840f, 830f);
+
+        var cardImage = card.AddComponent<Image>();
+        ApplyRoundedBackground(cardImage, new Color(0.09f, 0.11f, 0.15f, 1f));
+
+        Text title = CreateText(card.transform, "园区巡检 AR", 54, false);
+        SetTopStretch(title.rectTransform, -56f, 76f);
+        title.fontStyle = FontStyle.Bold;
+
+        Text subtitle = CreateText(card.transform, "登录后开始上报问题", 30, false);
+        SetTopStretch(subtitle.rectTransform, -136f, 50f);
+        subtitle.color = new Color(0.68f, 0.74f, 0.82f);
+
+        InputField usernameInput = CreateInputField(card.transform, "账号", -220f, 92f);
+
+        InputField passwordInput = CreateInputField(card.transform, "密码", -330f, 92f);
+        passwordInput.contentType = InputField.ContentType.Password;
+
+        Button loginButton = CreateWideButton(card.transform, "登录", -450f, 100f,
+            new Color(0.14f, 0.39f, 0.92f, 1f));
+
+        Text statusText = CreateText(card.transform, string.Empty, 28, false);
+        SetTopStretch(statusText.rectTransform, -572f, 56f);
+        statusText.color = new Color(1f, 0.55f, 0.5f);
+
+        InputField serverInput = CreateInputField(card.transform, "服务器地址", -648f, 80f);
+        serverInput.text = ApiClient.DefaultBaseUrl;
+
+        var form = panel.AddComponent<LoginForm>();
+        form.panel = panel;
+        form.usernameInput = usernameInput;
+        form.passwordInput = passwordInput;
+        form.serverInput = serverInput;
+        form.loginButton = loginButton;
+        form.statusText = statusText;
+
+        return form;
+    }
+
+    /// <summary>撑满父级宽度、按上边距定位的按钮。</summary>
+    private static Button CreateWideButton(Transform parent, string label, float topOffset, float height, Color color)
+    {
+        var buttonObject = new GameObject(label, typeof(RectTransform));
+        buttonObject.transform.SetParent(parent, false);
+
+        SetTopStretch(buttonObject.GetComponent<RectTransform>(), topOffset, height);
+
+        var image = buttonObject.AddComponent<Image>();
+        ApplyRoundedBackground(image, color);
+
+        var button = buttonObject.AddComponent<Button>();
+        CreateText(buttonObject.transform, label, 36);
+
+        return button;
+    }
+
+    /// <summary>
+    /// 问题列表：顶部标题 + 关闭，中间可滚动列表，底部刷新与状态文字。
+    /// 巡检员看到的是自己报的，管理员看到全部，区分在后端做。
+    /// </summary>
+    private static IssueListPanel CreateIssueListPanel(Transform canvas)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "IssueList", new Color(0.04f, 0.06f, 0.09f, 0.99f), true);
+
+        Text header = CreateText(panel.transform, "我的上报", 44, false);
+        var headerRect = header.rectTransform;
+        headerRect.anchorMin = new Vector2(0f, 1f);
+        headerRect.anchorMax = new Vector2(0f, 1f);
+        headerRect.pivot = new Vector2(0f, 1f);
+        headerRect.anchoredPosition = new Vector2(44f, -44f);
+        headerRect.sizeDelta = new Vector2(600f, 76f);
+        header.alignment = TextAnchor.MiddleLeft;
+        header.fontStyle = FontStyle.Bold;
+
+        Button closeButton = CreateFixedButton(
+            panel.transform, "关闭",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
+            new Vector2(170f, 84f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
+
+        var scrollObject = new GameObject("Scroll", typeof(RectTransform));
+        scrollObject.transform.SetParent(panel.transform, false);
+
+        var scrollArea = scrollObject.GetComponent<RectTransform>();
+        scrollArea.anchorMin = Vector2.zero;
+        scrollArea.anchorMax = Vector2.one;
+        scrollArea.offsetMin = new Vector2(40f, 150f);
+        scrollArea.offsetMax = new Vector2(-40f, -150f);
+
+        var scroll = scrollObject.AddComponent<ScrollRect>();
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 24f;
+
+        scrollObject.AddComponent<RectMask2D>();
+
+        var contentObject = new GameObject("Content", typeof(RectTransform));
+        contentObject.transform.SetParent(scrollObject.transform, false);
+
+        var contentRect = contentObject.GetComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        contentRect.anchoredPosition = Vector2.zero;
+        contentRect.sizeDelta = Vector2.zero;
+
+        var layout = contentObject.AddComponent<VerticalLayoutGroup>();
+        layout.spacing = 14f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = false;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        layout.childAlignment = TextAnchor.UpperCenter;
+
+        var fitter = contentObject.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        scroll.content = contentRect;
+        scroll.viewport = scrollArea;
+
+        GameObject rowTemplate = CreateIssueRow(contentObject.transform);
+
+        Button refreshButton = CreateFixedButton(
+            panel.transform, "刷新",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 36f),
+            new Vector2(170f, 84f), new Color(0.22f, 0.25f, 0.31f, 1f));
+
+        Text statusText = CreateText(panel.transform, string.Empty, 28, false);
+        var statusRect = statusText.rectTransform;
+        statusRect.anchorMin = new Vector2(0f, 0f);
+        statusRect.anchorMax = new Vector2(1f, 0f);
+        statusRect.pivot = new Vector2(0.5f, 0f);
+        statusRect.anchoredPosition = new Vector2(110f, 36f);
+        statusRect.sizeDelta = new Vector2(-320f, 84f);
+        statusText.alignment = TextAnchor.MiddleLeft;
+
+        var listPanel = panel.AddComponent<IssueListPanel>();
+        listPanel.panel = panel;
+        listPanel.content = contentRect;
+        listPanel.rowTemplate = rowTemplate;
+        listPanel.headerText = header;
+        listPanel.statusText = statusText;
+        listPanel.closeButton = closeButton;
+        listPanel.refreshButton = refreshButton;
+
+        return listPanel;
+    }
+
+    /// <summary>列表条目：左侧状态色条 + 标题 + 状态与时间。</summary>
+    private static GameObject CreateIssueRow(Transform parent)
+    {
+        var row = new GameObject("RowTemplate", typeof(RectTransform));
+        row.transform.SetParent(parent, false);
+
+        // childControlHeight 是关的，行高只能由这里直接定，LayoutElement 不生效
+        var rowRect = row.GetComponent<RectTransform>();
+        rowRect.sizeDelta = new Vector2(0f, 140f);
+
+        var rowImage = row.AddComponent<Image>();
+        ApplyRoundedBackground(rowImage, new Color(0.12f, 0.15f, 0.2f, 1f));
+
+        var badge = new GameObject("Badge", typeof(RectTransform));
+        badge.transform.SetParent(row.transform, false);
+
+        var badgeRect = badge.GetComponent<RectTransform>();
+        badgeRect.anchorMin = new Vector2(0f, 0.5f);
+        badgeRect.anchorMax = new Vector2(0f, 0.5f);
+        badgeRect.pivot = new Vector2(0f, 0.5f);
+        badgeRect.anchoredPosition = new Vector2(28f, 0f);
+        badgeRect.sizeDelta = new Vector2(10f, 76f);
+
+        var badgeImage = badge.AddComponent<Image>();
+        ApplyRoundedBackground(badgeImage, new Color(0.6f, 0.65f, 0.72f));
+
+        Text title = CreateText(row.transform, string.Empty, 34, false);
+        title.name = "Title";
+        var titleRect = title.rectTransform;
+        titleRect.anchorMin = new Vector2(0f, 1f);
+        titleRect.anchorMax = new Vector2(1f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.offsetMin = new Vector2(72f, -66f);
+        titleRect.offsetMax = new Vector2(-32f, -20f);
+        title.alignment = TextAnchor.MiddleLeft;
+
+        Text meta = CreateText(row.transform, string.Empty, 28, false);
+        meta.name = "Meta";
+        var metaRect = meta.rectTransform;
+        metaRect.anchorMin = new Vector2(0f, 0f);
+        metaRect.anchorMax = new Vector2(1f, 0f);
+        metaRect.pivot = new Vector2(0.5f, 0f);
+        metaRect.offsetMin = new Vector2(72f, 20f);
+        metaRect.offsetMax = new Vector2(-32f, 62f);
+        meta.alignment = TextAnchor.MiddleLeft;
+        meta.color = new Color(0.68f, 0.74f, 0.82f);
+
+        row.SetActive(false);
+        return row;
+    }
+
     private static IssueForm CreateFormPanel(Transform canvas)
     {
         var panelObject = new GameObject("IssueForm", typeof(RectTransform));
@@ -771,7 +1017,7 @@ public static class SceneBuilder
         panelRect.sizeDelta = new Vector2(-40f, 560f);
 
         var panelImage = panelObject.AddComponent<Image>();
-        panelImage.color = new Color(0.06f, 0.08f, 0.11f, 0.95f);
+        ApplyRoundedBackground(panelImage, new Color(0.06f, 0.08f, 0.11f, 0.95f));
 
         // 第一行左侧给出“位置已记录”的确认，右侧留给「设置」
         var coordText = CreateText(panelObject.transform, "已记录标记位置", 28, false);
@@ -852,6 +1098,75 @@ public static class SceneBuilder
 
     // ---------------------------------------------------------------- 界面辅助
 
+    /// <summary>
+    /// 圆角矩形贴图，用作 9 宫格背景。UGUI 默认只有直角方块，
+    /// 换成圆角是观感提升最直接的一步，且不需要引入第三方 UI 包。
+    /// </summary>
+    private static Sprite CreateRoundedSprite()
+    {
+        const string path = "Assets/Textures/UIRounded.png";
+        const int size = 64;
+        const int radius = 20;
+
+        var existing = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var pixels = new Color32[size * size];
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                // 只算到圆角矩形四个角距离，中间区域直接不透明
+                float dx = Mathf.Max(radius - x, x - (size - 1 - radius), 0f);
+                float dy = Mathf.Max(radius - y, y - (size - 1 - radius), 0f);
+                bool inside = dx * dx + dy * dy <= radius * radius;
+
+                pixels[y * size + x] = inside
+                    ? new Color32(255, 255, 255, 255)
+                    : new Color32(255, 255, 255, 0);
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply();
+
+        File.WriteAllBytes(path, texture.EncodeToPNG());
+        Object.DestroyImmediate(texture);
+
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+        var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+        if (importer != null)
+        {
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteBorder = new Vector4(radius, radius, radius, radius);
+            importer.spritePixelsPerUnit = 100;
+            importer.mipmapEnabled = false;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.filterMode = FilterMode.Bilinear;
+            importer.SaveAndReimport();
+        }
+
+        return AssetDatabase.LoadAssetAtPath<Sprite>(path);
+    }
+
+    private static void ApplyRoundedBackground(Image image, Color color)
+    {
+        Sprite sprite = CreateRoundedSprite();
+        if (sprite != null)
+        {
+            image.sprite = sprite;
+            image.type = Image.Type.Sliced;
+        }
+
+        image.color = color;
+    }
+
     private static GameObject CreateFullScreenPanel(Transform canvas, string name, Color color, bool raycastTarget)
     {
         var panelObject = new GameObject(name, typeof(RectTransform));
@@ -891,7 +1206,7 @@ public static class SceneBuilder
         rect.sizeDelta = size;
 
         var image = buttonObject.AddComponent<Image>();
-        image.color = color;
+        ApplyRoundedBackground(image, color);
 
         var button = buttonObject.AddComponent<Button>();
         CreateText(buttonObject.transform, label, 34);
@@ -912,7 +1227,7 @@ public static class SceneBuilder
         rect.offsetMax = new Vector2(-6f, 0f);
 
         var image = buttonObject.AddComponent<Image>();
-        image.color = new Color(0.22f, 0.25f, 0.31f, 1f);
+        ApplyRoundedBackground(image, new Color(0.22f, 0.25f, 0.31f, 1f));
 
         var button = buttonObject.AddComponent<Button>();
         CreateText(buttonObject.transform, label, 30);
@@ -928,7 +1243,7 @@ public static class SceneBuilder
         SetTopStretch(inputObject.GetComponent<RectTransform>(), topOffset, height);
 
         var background = inputObject.AddComponent<Image>();
-        background.color = new Color(1f, 1f, 1f, 0.14f);
+        ApplyRoundedBackground(background, new Color(1f, 1f, 1f, 0.2f));
 
         var input = inputObject.AddComponent<InputField>();
 
@@ -937,7 +1252,7 @@ public static class SceneBuilder
 
         Text hint = CreateText(inputObject.transform, placeholder, 28);
         hint.alignment = TextAnchor.MiddleLeft;
-        hint.color = new Color(1f, 1f, 1f, 0.38f);
+        hint.color = new Color(1f, 1f, 1f, 0.55f);
 
         input.textComponent = text;
         input.placeholder = hint;

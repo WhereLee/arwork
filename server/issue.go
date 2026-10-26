@@ -25,6 +25,7 @@ type Position struct {
 }
 
 // Issue 是本题唯一的实体，规则都落在它身上。
+// Reporter 记录是谁报的，巡检员只能看到自己的那几条。
 type Issue struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
@@ -32,6 +33,7 @@ type Issue struct {
 	Priority    string    `json:"priority"`
 	Status      string    `json:"status"`
 	Position    Position  `json:"position"`
+	Reporter    string    `json:"reporter"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -58,9 +60,10 @@ func validStatus(s string) bool {
 	return false
 }
 
-// NewIssue 按实体不变量构造新问题：id 与时间由服务端生成，状态固定为 open。
+// NewIssue 按实体不变量构造新问题：id 与时间由服务端生成，状态固定为 open，
+// reporter 由登录身份决定，客户端不能自己填。
 // 标题与描述去掉首尾空格（人输入）；枚举值严格按字面匹配，不接受大小写变体。
-func NewIssue(title, description, priority string, position Position, now time.Time) (Issue, error) {
+func NewIssue(title, description, priority string, position Position, reporter string, now time.Time) (Issue, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return Issue{}, ErrEmptyTitle
@@ -83,6 +86,7 @@ func NewIssue(title, description, priority string, position Position, now time.T
 		Priority:    priority,
 		Status:      StatusOpen,
 		Position:    position,
+		Reporter:    strings.TrimSpace(reporter),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil

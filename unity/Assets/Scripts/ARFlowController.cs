@@ -13,10 +13,12 @@ public class ARFlowController : MonoBehaviour
 {
     private enum Mode
     {
+        Login,
         Guide,
         Detecting,
         Form,
         Confirm,
+        List,
     }
 
     [Header("组件")]
@@ -26,6 +28,10 @@ public class ARFlowController : MonoBehaviour
     public PlaceMarker placer;
     public ARReticle reticle;
     public IssueForm form;
+
+    [Header("账号与列表")]
+    public LoginForm loginForm;
+    public IssueListPanel listPanel;
 
     [Header("界面")]
     public GameObject guidePanel;
@@ -40,6 +46,8 @@ public class ARFlowController : MonoBehaviour
     public Button hudVerticalButton;
     public Button confirmYesButton;
     public Button confirmNoButton;
+    public Button openListButton;
+    public Text accountText;
 
     /// <summary>屏幕中心指着的那块平面，提亮显示。</summary>
     private static readonly Color FocusColor = new Color(1f, 1f, 1f, 0.45f);
@@ -98,6 +106,23 @@ public class ARFlowController : MonoBehaviour
             confirmNoButton.onClick.AddListener(CancelExit);
         }
 
+        if (openListButton != null)
+        {
+            openListButton.onClick.AddListener(OpenList);
+        }
+
+        if (loginForm != null)
+        {
+            loginForm.LoggedIn += OnLoggedIn;
+        }
+
+        if (listPanel != null)
+        {
+            listPanel.Closed += OnListClosed;
+        }
+
+        ApiClient.Unauthorized += OnUnauthorized;
+
         if (form != null)
         {
             form.Submitted += OnSubmitted;
@@ -112,11 +137,26 @@ public class ARFlowController : MonoBehaviour
             form.Submitted -= OnSubmitted;
             form.Cancelled -= OnCancelled;
         }
+
+        if (loginForm != null)
+        {
+            loginForm.LoggedIn -= OnLoggedIn;
+        }
+
+        if (listPanel != null)
+        {
+            listPanel.Closed -= OnListClosed;
+        }
+
+        ApiClient.Unauthorized -= OnUnauthorized;
     }
 
     private void Start()
     {
-        SetMode(Mode.Guide);
+        Session.Load();
+
+        // 有未过期的 token 就直接进引导页，否则先登录
+        SetMode(Session.IsLoggedIn ? Mode.Guide : Mode.Login);
     }
 
     // ------------------------------------------------------------ 入口
@@ -265,19 +305,44 @@ public class ARFlowController : MonoBehaviour
     {
         _mode = next;
 
+        if (loginForm != null)
+        {
+            if (next == Mode.Login)
+            {
+                loginForm.Show();
+            }
+            else
+            {
+                loginForm.Hide();
+            }
+        }
+
         if (guidePanel != null)
         {
             guidePanel.SetActive(next == Mode.Guide);
         }
 
+        // HUD 只在检测、表单、退出确认这三页出现
         if (hudPanel != null)
         {
-            hudPanel.SetActive(next != Mode.Guide);
+            hudPanel.SetActive(next == Mode.Detecting || next == Mode.Form || next == Mode.Confirm);
         }
 
         if (confirmPanel != null)
         {
             confirmPanel.SetActive(next == Mode.Confirm);
+        }
+
+        if (listPanel != null)
+        {
+            if (next == Mode.List)
+            {
+                listPanel.Show();
+            }
+            else
+            {
+                listPanel.Hide();
+            }
         }
 
         if (placer != null)
@@ -295,7 +360,51 @@ public class ARFlowController : MonoBehaviour
             form.Hide();
         }
 
+        RefreshAccountText();
+
         Debug.Log("[AR] 模式 → " + next);
+    }
+
+    private void RefreshAccountText()
+    {
+        if (accountText == null)
+        {
+            return;
+        }
+
+        if (!Session.IsLoggedIn)
+        {
+            accountText.text = string.Empty;
+            return;
+        }
+
+        accountText.text = Session.Username + " · " + (Session.IsAdmin ? "管理员" : "巡检员");
+    }
+
+    /// <summary>引导页点「我的上报」。</summary>
+    public void OpenList()
+    {
+        if (_mode == Mode.Guide)
+        {
+            SetMode(Mode.List);
+        }
+    }
+
+    private void OnListClosed()
+    {
+        SetMode(Mode.Guide);
+    }
+
+    private void OnLoggedIn()
+    {
+        SetMode(Mode.Guide);
+    }
+
+    /// <summary>token 失效：清掉登录态，回登录页。</summary>
+    private void OnUnauthorized()
+    {
+        Session.Clear();
+        SetMode(Mode.Login);
     }
 
     private void RefreshSwitchButtons()
