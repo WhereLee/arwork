@@ -1,5 +1,5 @@
 import { clearSession, loadSession } from './auth';
-import type { Issue, Session, Status } from './types';
+import type { Issue, IssueDetail, Session, UserView } from './types';
 
 const BASE = (import.meta.env.VITE_API_BASE ?? 'http://localhost:8080').replace(/\/$/, '');
 
@@ -68,16 +68,59 @@ export async function login(username: string, password: string): Promise<Session
     throw new Error(await readErrorMessage(response));
   }
 
-  return (await response.json()) as Session;
+  const body = (await response.json()) as Session & { specialties?: string[] };
+
+  return { token: body.token, username: body.username, role: body.role };
 }
 
 export function listIssues(): Promise<Issue[]> {
   return request<Issue[]>('/issues');
 }
 
-export function updateIssueStatus(id: string, status: Status): Promise<Issue> {
-  return request<Issue>(`/issues/${id}/status`, {
+export function getIssue(id: string): Promise<IssueDetail> {
+  return request<IssueDetail>(`/issues/${id}`);
+}
+
+export interface ActionPayload {
+  action: string;
+  assignee?: string;
+  note?: string;
+}
+
+/** 工单流转的唯一入口：派单、退回、提交、撤回、验收、驳回、重开、关闭。 */
+export function performAction(id: string, payload: ActionPayload): Promise<IssueDetail> {
+  return request<IssueDetail>(`/issues/${id}/actions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listUsers(): Promise<UserView[]> {
+  return request<UserView[]>('/users');
+}
+
+export interface CreateUserPayload {
+  username: string;
+  password: string;
+  role: string;
+  specialties: string[];
+}
+
+export function createUser(payload: CreateUserPayload): Promise<UserView> {
+  return request<UserView>('/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface UpdateUserPayload {
+  specialties?: string[];
+  active?: boolean;
+}
+
+export function updateUser(username: string, payload: UpdateUserPayload): Promise<UserView> {
+  return request<UserView>(`/users/${encodeURIComponent(username)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ status }),
+    body: JSON.stringify(payload),
   });
 }

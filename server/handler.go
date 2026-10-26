@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -9,8 +10,10 @@ import (
 )
 
 // API 把 HTTP 动作接到实体与仓储上。
+// ai 在启动时读一次配置，没有 key 时 Enabled() 为 false，自动派单直接降级。
 type API struct {
 	store *Store
+	ai    AIConfig
 }
 
 func (a *API) Routes() http.Handler {
@@ -22,9 +25,21 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("POST /issues",
 		a.requireRole([]string{RoleInspector, RoleAdmin}, a.handleCreate))
 	mux.HandleFunc("GET /issues",
-		a.requireRole([]string{RoleInspector, RoleAdmin}, a.handleList))
+		a.requireRole([]string{RoleInspector, RoleAdmin, RoleRepairer}, a.handleList))
+	mux.HandleFunc("GET /issues/{id}",
+		a.requireRole([]string{RoleInspector, RoleAdmin, RoleRepairer}, a.handleDetail))
+	mux.HandleFunc("POST /issues/{id}/actions",
+		a.requireRole([]string{RoleAdmin, RoleRepairer}, a.handleAction))
 	mux.HandleFunc("PATCH /issues/{id}/status",
 		a.requireRole([]string{RoleAdmin}, a.handleUpdateStatus))
+
+	// 人员管理只有管理员能做
+	mux.HandleFunc("GET /users",
+		a.requireRole([]string{RoleAdmin}, a.handleListUsers))
+	mux.HandleFunc("POST /users",
+		a.requireRole([]string{RoleAdmin}, a.handleCreateUser))
+	mux.HandleFunc("PATCH /users/{username}",
+		a.requireRole([]string{RoleAdmin}, a.handleUpdateUser))
 
 	return withCORS(mux)
 }
@@ -41,6 +56,24 @@ type statusRequest struct {
 	Status string `json:"status"`
 }
 
+// actionRequest 是一次流转动作。不同 action 用到的字段不同。
+type actionRequest struct {
+	Action   string `json:"action"`
+	Assignee string `json:"assignee"`
+	Note     string `json:"note"`
+}
+
+// detailResponse 是详情页要的东西：工单本体 + 全部留痕。
+type detailResponse struct {
+	Issue  Issue        `json:"issue"`
+	Events []IssueEvent `json:"events"`
+}
+
+var (
+	ErrForbidden = errors.New("当前账号没有这个操作权限")
+	ErrNotYours  = errors.New("这条工单不在你名下")
+)
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -51,9 +84,10 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token    string `json:"token"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Token       string   `json:"token"`
+	Username    string   `json:"username"`
+	Role        string   `json:"role"`
+	Specialties []string `json:"specialties"`
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -82,9 +116,10 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, loginResponse{
-		Token:    SignToken(user, time.Now()),
-		Username: user.Username,
-		Role:     user.Role,
+		Token:       SignToken(user, time.Now()),
+		Username:    user.Username,
+		Role:        user.Role,
+		Specialties: user.Specialties,
 	})
 }
 
@@ -102,16 +137,26 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 上报人取自登录身份，客户端传什么都不算
-	issue, err := NewIssue(req.Title, req.Description, req.Priority, req.Position, claims.Username, time.Now())
+	now := time.Now()
+	issue, err := NewIssue(req.Title, req.Description, req.Priority, req.Position, claims.Username, now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := a.store.Create(issue); err != nil {
+	created := newEvent(issue.ID, claims.Username, ActionCreated, "", issue.Status, "提交问题", now)
+	if err := a.store.Create(issue, created); err != nil {
 		log.Printf("保存问题失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "保存问题失败")
 		return
+	}
+
+	// 工单已经落库，再尝试自动派单。AI 挂了也只是转人工，不影响上报本身。
+	dispatchEvent := a.AutoDispatch(r.Context(), &issue, time.Now())
+	if applied, err := a.store.ApplyChange(issue, StatusOpen, dispatchEvent); err != nil {
+		log.Printf("写回派单结果失败: %v", err)
+	} else if !applied {
+		log.Printf("写回派单结果时工单已被改动: %s", issue.ID)
 	}
 
 	writeJSON(w, http.StatusCreated, issue)
@@ -129,9 +174,12 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 		err    error
 	)
 
-	if claims.Role == RoleAdmin {
+	switch claims.Role {
+	case RoleAdmin:
 		issues, err = a.store.List()
-	} else {
+	case RoleRepairer:
+		issues, err = a.store.ListByAssignee(claims.Username)
+	default:
 		issues, err = a.store.ListByReporter(claims.Username)
 	}
 
@@ -144,7 +192,114 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issues)
 }
 
+// handleDetail 返回工单本体和它的全部留痕，给网页端的抽屉和时间线用。
+func (a *API) handleDetail(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	id := r.PathValue("id")
+
+	issue, found, err := a.store.Get(id)
+	if err != nil {
+		log.Printf("查询问题失败: %v", err)
+		writeError(w, http.StatusInternalServerError, "查询问题失败")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "问题不存在")
+		return
+	}
+
+	if !canView(claims, issue) {
+		writeError(w, http.StatusForbidden, ErrForbidden.Error())
+		return
+	}
+
+	events, err := a.store.ListEvents(id)
+	if err != nil {
+		log.Printf("查询工单留痕失败: %v", err)
+		writeError(w, http.StatusInternalServerError, "查询工单留痕失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detailResponse{Issue: issue, Events: events})
+}
+
+// handleAction 是工单流转的唯一入口：派单、退回、提交、撤回、验收、驳回、重开、关闭。
+// 所有动作先校验状态（用 from 状态做条件更新），被人抢先改过就回 409。
+func (a *API) handleAction(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	id := r.PathValue("id")
+
+	var req actionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体不是合法的 JSON")
+		return
+	}
+
+	issue, found, err := a.store.Get(id)
+	if err != nil {
+		log.Printf("查询问题失败: %v", err)
+		writeError(w, http.StatusInternalServerError, "查询问题失败")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "问题不存在")
+		return
+	}
+
+	previous := issue.Status
+	now := time.Now()
+
+	event, err := a.applyAction(r.Context(), claims, &issue, req, now)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, ErrForbidden) || errors.Is(err, ErrNotYours) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+
+	applied, err := a.store.ApplyChange(issue, previous, event)
+	if err != nil {
+		log.Printf("更新工单失败: %v", err)
+		writeError(w, http.StatusInternalServerError, "更新工单失败")
+		return
+	}
+
+	if !applied {
+		if current, found, err := a.store.Get(id); err == nil && found {
+			issue = current
+		}
+		writeConflict(w, issue)
+		return
+	}
+
+	events, err := a.store.ListEvents(id)
+	if err != nil {
+		log.Printf("查询工单留痕失败: %v", err)
+		events = []IssueEvent{event}
+	}
+
+	writeJSON(w, http.StatusOK, detailResponse{Issue: issue, Events: events})
+}
+
 func (a *API) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
 	id := r.PathValue("id")
 
 	var req statusRequest
@@ -164,15 +319,37 @@ func (a *API) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	previous := issue.Status
+	now := time.Now()
+
 	// 状态合法性由实体自己判断，handler 不再碰枚举
-	if err := issue.ChangeStatus(req.Status, time.Now()); err != nil {
+	if err := issue.ChangeStatus(req.Status, now); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if _, err := a.store.Update(issue); err != nil {
+	// 直接改状态只能在合法流转之间走，不能跳过派单把人从"未处理"改成"处理中"
+	if !canTransition(previous, issue.Status) {
+		writeError(w, http.StatusConflict, "这条工单不能从「"+statusLabel(previous)+"」直接变成「"+statusLabel(issue.Status)+"」")
+		return
+	}
+
+	event := newEvent(issue.ID, claims.Username, actionForStatusChange(previous, issue.Status),
+		previous, issue.Status, "", now)
+
+	applied, err := a.store.ApplyChange(issue, previous, event)
+	if err != nil {
 		log.Printf("更新状态失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "更新状态失败")
+		return
+	}
+
+	if !applied {
+		// 被别的请求抢先改了，把最新状态告诉调用方
+		if current, found, err := a.store.Get(issue.ID); err == nil && found {
+			issue = current
+		}
+		writeConflict(w, issue)
 		return
 	}
 
@@ -190,6 +367,14 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, errorResponse{Error: message})
+}
+
+// writeConflict 在并发冲突时返回 409，并把当前真实状态一并告诉调用方。
+func writeConflict(w http.ResponseWriter, issue Issue) {
+	writeJSON(w, http.StatusConflict, map[string]string{
+		"error":  "这条工单刚被改动，请刷新后重试",
+		"status": issue.Status,
+	})
 }
 
 // withCORS 放行浏览器跨域，React 管理端才能直接访问后端。
