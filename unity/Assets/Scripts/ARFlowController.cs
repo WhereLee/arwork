@@ -19,6 +19,7 @@ public class ARFlowController : MonoBehaviour
         Form,
         Confirm,
         List,
+        Detail,
     }
 
     [Header("组件")]
@@ -32,6 +33,7 @@ public class ARFlowController : MonoBehaviour
     [Header("账号与列表")]
     public LoginForm loginForm;
     public IssueListPanel listPanel;
+    public IssueDetailPanel detailPanel;
 
     [Header("界面")]
     public GameObject guidePanel;
@@ -119,6 +121,13 @@ public class ARFlowController : MonoBehaviour
         if (listPanel != null)
         {
             listPanel.Closed += OnListClosed;
+            listPanel.RowClicked += OnRowClicked;
+        }
+
+        if (detailPanel != null)
+        {
+            detailPanel.Closed += OnDetailClosed;
+            detailPanel.Changed += OnDetailChanged;
         }
 
         ApiClient.Unauthorized += OnUnauthorized;
@@ -146,6 +155,13 @@ public class ARFlowController : MonoBehaviour
         if (listPanel != null)
         {
             listPanel.Closed -= OnListClosed;
+            listPanel.RowClicked -= OnRowClicked;
+        }
+
+        if (detailPanel != null)
+        {
+            detailPanel.Closed -= OnDetailClosed;
+            detailPanel.Changed -= OnDetailChanged;
         }
 
         ApiClient.Unauthorized -= OnUnauthorized;
@@ -155,8 +171,19 @@ public class ARFlowController : MonoBehaviour
     {
         Session.Load();
 
-        // 有未过期的 token 就直接进引导页，否则先登录
-        SetMode(Session.IsLoggedIn ? Mode.Guide : Mode.Login);
+        // 没登录先登录；修复者直接落到派单列表；其他人走引导页
+        if (!Session.IsLoggedIn)
+        {
+            SetMode(Mode.Login);
+        }
+        else if (Session.Role == "repairer")
+        {
+            SetMode(Mode.List);
+        }
+        else
+        {
+            SetMode(Mode.Guide);
+        }
     }
 
     // ------------------------------------------------------------ 入口
@@ -339,10 +366,16 @@ public class ARFlowController : MonoBehaviour
             {
                 listPanel.Show();
             }
-            else
+            else if (next != Mode.Detail)
             {
+                // 详情是全屏不透明的，开着它的时候列表不用收起，回来时保留滚动位置
                 listPanel.Hide();
             }
+        }
+
+        if (next != Mode.Detail && detailPanel != null)
+        {
+            detailPanel.Hide();
         }
 
         if (placer != null)
@@ -367,18 +400,65 @@ public class ARFlowController : MonoBehaviour
 
     private void RefreshAccountText()
     {
-        if (accountText == null)
+        if (accountText != null)
+        {
+            if (!Session.IsLoggedIn)
+            {
+                accountText.text = string.Empty;
+            }
+            else
+            {
+                accountText.text = Session.Username + " · " + RoleLabel(Session.Role);
+            }
+        }
+
+        // 修复者的入口叫「派给我的」，不是「我的上报」
+        if (openListButton != null)
+        {
+            Text label = openListButton.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                label.text = Session.Role == "repairer" ? "派给我的" : "我的上报";
+            }
+        }
+    }
+
+    private static string RoleLabel(string role)
+    {
+        switch (role)
+        {
+            case "admin":
+                return "管理员";
+            case "repairer":
+                return "修复者";
+            default:
+                return "巡检员";
+        }
+    }
+
+    private void OnRowClicked(IssueSummary issue)
+    {
+        if (_mode != Mode.List || detailPanel == null)
         {
             return;
         }
 
-        if (!Session.IsLoggedIn)
-        {
-            accountText.text = string.Empty;
-            return;
-        }
+        detailPanel.Show(issue);
+        SetMode(Mode.Detail);
+    }
 
-        accountText.text = Session.Username + " · " + (Session.IsAdmin ? "管理员" : "巡检员");
+    private void OnDetailClosed()
+    {
+        SetMode(Mode.List);
+    }
+
+    /// <summary>详情里动过工单（交活或退回），列表必须重新拉一次。</summary>
+    private void OnDetailChanged()
+    {
+        if (listPanel != null)
+        {
+            listPanel.Reload();
+        }
     }
 
     /// <summary>引导页点「我的上报」。</summary>
@@ -397,7 +477,8 @@ public class ARFlowController : MonoBehaviour
 
     private void OnLoggedIn()
     {
-        SetMode(Mode.Guide);
+        // 修复者登录后直接落到「派给我的」，其他人走引导页
+        SetMode(Session.Role == "repairer" ? Mode.List : Mode.Guide);
     }
 
     /// <summary>token 失效：清掉登录态，回登录页。</summary>

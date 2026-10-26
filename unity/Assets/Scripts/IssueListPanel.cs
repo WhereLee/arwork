@@ -1,12 +1,12 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 问题列表：显示当前账号能看到的问题和状态。
-/// 巡检员拿到的是自己报的，管理员拿到全部——这个区分由后端按角色做，前端只管展示。
+/// 问题列表。巡检员看到自己报的，修复者看到派给自己的，管理员看到全部。
+/// 这个区分由后端按角色做，前端只管展示。
 /// </summary>
 public class IssueListPanel : MonoBehaviour
 {
@@ -23,15 +23,15 @@ public class IssueListPanel : MonoBehaviour
     public Text statusText;
     public Button closeButton;
     public Button refreshButton;
-    public InputField serverInput;
 
     /// <summary>关闭时触发，由流程控制决定回到哪一页。</summary>
-    public event System.Action Closed;
+    public event Action Closed;
 
-    private static readonly Color PendingColor = new Color(0.95f, 0.62f, 0.18f);
-    private static readonly Color DoingColor = new Color(0.28f, 0.58f, 0.95f);
-    private static readonly Color DoneColor = new Color(0.3f, 0.78f, 0.45f);
+    /// <summary>点了某一条，由流程控制打开详情。</summary>
+    public event Action<IssueSummary> RowClicked;
+
     private static readonly Color HintColor = new Color(0.75f, 0.8f, 0.88f);
+    private static readonly Color ErrorColor = new Color(1f, 0.55f, 0.5f);
 
     private readonly List<GameObject> _rows = new List<GameObject>();
     private Coroutine _loading;
@@ -45,7 +45,7 @@ public class IssueListPanel : MonoBehaviour
 
         if (refreshButton != null)
         {
-            refreshButton.onClick.AddListener(delegate { Reload(); });
+            refreshButton.onClick.AddListener(Reload);
         }
 
         if (rowTemplate != null)
@@ -68,20 +68,10 @@ public class IssueListPanel : MonoBehaviour
 
         if (headerText != null)
         {
-            headerText.text = Session.IsAdmin ? "全部问题" : "我的上报";
+            headerText.text = TitleFor(Session.Role);
         }
 
         Reload();
-    }
-
-    private void Close()
-    {
-        Hide();
-
-        if (Closed != null)
-        {
-            Closed();
-        }
     }
 
     /// <summary>只收起面板，不触发 Closed。切换页面时由流程控制调用。</summary>
@@ -99,7 +89,8 @@ public class IssueListPanel : MonoBehaviour
         }
     }
 
-    private void Reload()
+    /// <summary>重新拉一次列表。详情里动过工单后也会调它。</summary>
+    public void Reload()
     {
         if (_loading != null)
         {
@@ -109,14 +100,22 @@ public class IssueListPanel : MonoBehaviour
         _loading = StartCoroutine(Load());
     }
 
+    private void Close()
+    {
+        Hide();
+
+        if (Closed != null)
+        {
+            Closed();
+        }
+    }
+
     private IEnumerator Load()
     {
         ClearRows();
         SetStatus("正在读取…", HintColor);
 
-        string baseUrl = serverInput != null && !string.IsNullOrEmpty(serverInput.text)
-            ? serverInput.text.Trim()
-            : ApiClient.DefaultBaseUrl;
+        string baseUrl = ApiClient.LastBaseUrl;
 
         IssueSummary[] items = null;
         string error = null;
@@ -129,13 +128,13 @@ public class IssueListPanel : MonoBehaviour
 
         if (error != null)
         {
-            SetStatus("读取失败：" + error, new Color(1f, 0.55f, 0.5f));
+            SetStatus("读取失败：" + error, ErrorColor);
             yield break;
         }
 
         if (items == null || items.Length == 0)
         {
-            SetStatus(Session.IsAdmin ? "还没有任何记录" : "你还没有上报过问题", HintColor);
+            SetStatus(EmptyFor(Session.Role), HintColor);
             yield break;
         }
 
@@ -160,7 +159,7 @@ public class IssueListPanel : MonoBehaviour
         _rows.Add(row);
 
         SetText(row.transform, "Title", issue.title);
-        SetText(row.transform, "Meta", StatusLabel(issue.status) + " · " + FormatTime(issue.createdAt));
+        SetText(row.transform, "Meta", BuildMeta(issue));
 
         Transform badge = row.transform.Find("Badge");
         if (badge != null)
@@ -168,8 +167,22 @@ public class IssueListPanel : MonoBehaviour
             var image = badge.GetComponent<Image>();
             if (image != null)
             {
-                image.color = StatusColor(issue.status);
+                image.color = IssueFormat.StatusColor(issue.status);
             }
+        }
+
+        // 每一行捕获自己的数据，点哪条开哪条
+        var button = row.GetComponent<Button>();
+        if (button != null)
+        {
+            IssueSummary captured = issue;
+            button.onClick.AddListener(delegate
+            {
+                if (RowClicked != null)
+                {
+                    RowClicked(captured);
+                }
+            });
         }
     }
 
@@ -184,6 +197,44 @@ public class IssueListPanel : MonoBehaviour
         }
 
         _rows.Clear();
+    }
+
+    private static string BuildMeta(IssueSummary issue)
+    {
+        string meta = IssueFormat.StatusLabel(issue.status) + " · " + IssueFormat.Time(issue.createdAt);
+
+        if (!string.IsNullOrEmpty(issue.category))
+        {
+            meta += " · " + IssueFormat.CategoryLabel(issue.category);
+        }
+
+        return meta;
+    }
+
+    private static string TitleFor(string role)
+    {
+        switch (role)
+        {
+            case "repairer":
+                return "派给我的";
+            case "admin":
+                return "全部工单";
+            default:
+                return "我的上报";
+        }
+    }
+
+    private static string EmptyFor(string role)
+    {
+        switch (role)
+        {
+            case "repairer":
+                return "现在没有派给你的工单";
+            case "admin":
+                return "还没有任何工单";
+            default:
+                return "你还没有上报过问题";
+        }
     }
 
     private static void SetText(Transform row, string childName, string value)
@@ -210,53 +261,5 @@ public class IssueListPanel : MonoBehaviour
 
         statusText.text = message;
         statusText.color = color;
-    }
-
-    private static string StatusLabel(string status)
-    {
-        switch (status)
-        {
-            case "open":
-                return "待处理";
-            case "in_progress":
-                return "处理中";
-            case "resolved":
-                return "已解决";
-            default:
-                return status;
-        }
-    }
-
-    private static Color StatusColor(string status)
-    {
-        switch (status)
-        {
-            case "open":
-                return PendingColor;
-            case "in_progress":
-                return DoingColor;
-            case "resolved":
-                return DoneColor;
-            default:
-                return Color.gray;
-        }
-    }
-
-    /// <summary>后端时间是 RFC3339，转成本地时区的月-日 时:分。</summary>
-    private static string FormatTime(string iso)
-    {
-        if (string.IsNullOrEmpty(iso))
-        {
-            return string.Empty;
-        }
-
-        System.DateTime parsed;
-        if (System.DateTime.TryParse(
-            iso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out parsed))
-        {
-            return parsed.ToLocalTime().ToString("MM-dd HH:mm");
-        }
-
-        return iso;
     }
 }

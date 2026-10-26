@@ -47,6 +47,8 @@ public static class SceneBuilder
 
         public LoginForm loginForm;
         public IssueListPanel listPanel;
+        public IssueDetailPanel detailPanel;
+        public ReasonDialog reasonDialog;
         public IssueForm form;
     }
 
@@ -602,6 +604,7 @@ public static class SceneBuilder
         flow.accountText = ui.accountText;
         flow.loginForm = ui.loginForm;
         flow.listPanel = ui.listPanel;
+        flow.detailPanel = ui.detailPanel;
 
         placer.flow = flow;
 
@@ -643,6 +646,10 @@ public static class SceneBuilder
         refs.hudPanel = CreateHudPanel(canvas, refs);
         refs.confirmPanel = CreateConfirmPanel(canvas, refs);
         refs.listPanel = CreateIssueListPanel(canvas);
+        // 详情在下、输入弹窗在上，弹窗要能盖住详情
+        refs.detailPanel = CreateIssueDetailPanel(canvas);
+        refs.reasonDialog = CreateReasonDialog(canvas);
+        refs.detailPanel.reasonDialog = refs.reasonDialog;
         refs.form = CreateFormPanel(canvas);
 
         return refs;
@@ -965,6 +972,9 @@ public static class SceneBuilder
         var rowImage = row.AddComponent<Image>();
         ApplyRoundedBackground(rowImage, new Color(0.12f, 0.15f, 0.2f, 1f));
 
+        // 整行可点，点开详情
+        row.AddComponent<Button>().targetGraphic = rowImage;
+
         var badge = new GameObject("Badge", typeof(RectTransform));
         badge.transform.SetParent(row.transform, false);
 
@@ -1001,6 +1011,207 @@ public static class SceneBuilder
 
         row.SetActive(false);
         return row;
+    }
+
+    /// <summary>
+    /// 工单详情：标题、状态、元信息、描述、处理记录，底部按状态给完成 / 退回。
+    /// 正文放在可滚动区域里，描述再长也能看全。
+    /// </summary>
+    private static IssueDetailPanel CreateIssueDetailPanel(Transform canvas)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "IssueDetail", new Color(0.04f, 0.06f, 0.09f, 0.99f), true);
+
+        Text title = CreateText(panel.transform, string.Empty, 40, false);
+        var titleRect = title.rectTransform;
+        titleRect.anchorMin = new Vector2(0f, 1f);
+        titleRect.anchorMax = new Vector2(1f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.offsetMin = new Vector2(44f, -150f);
+        titleRect.offsetMax = new Vector2(-230f, -40f);
+        title.alignment = TextAnchor.MiddleLeft;
+        title.fontStyle = FontStyle.Bold;
+
+        Button closeButton = CreateFixedButton(
+            panel.transform, "关闭",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
+            new Vector2(170f, 84f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
+
+        var scrollObject = new GameObject("Scroll", typeof(RectTransform));
+        scrollObject.transform.SetParent(panel.transform, false);
+
+        var scrollArea = scrollObject.GetComponent<RectTransform>();
+        scrollArea.anchorMin = Vector2.zero;
+        scrollArea.anchorMax = Vector2.one;
+        scrollArea.offsetMin = new Vector2(40f, 230f);
+        scrollArea.offsetMax = new Vector2(-40f, -160f);
+
+        var scroll = scrollObject.AddComponent<ScrollRect>();
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 24f;
+
+        scrollObject.AddComponent<RectMask2D>();
+
+        var contentObject = new GameObject("Content", typeof(RectTransform));
+        contentObject.transform.SetParent(scrollObject.transform, false);
+
+        var contentRect = contentObject.GetComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        contentRect.anchoredPosition = Vector2.zero;
+        contentRect.sizeDelta = Vector2.zero;
+
+        var layout = contentObject.AddComponent<VerticalLayoutGroup>();
+        layout.spacing = 18f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        layout.childAlignment = TextAnchor.UpperLeft;
+
+        contentObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        scroll.content = contentRect;
+        scroll.viewport = scrollArea;
+
+        Text status = CreateBodyText(contentObject.transform, string.Empty, 32);
+        status.fontStyle = FontStyle.Bold;
+
+        Text meta = CreateBodyText(contentObject.transform, string.Empty, 28);
+        meta.color = new Color(0.68f, 0.74f, 0.82f);
+
+        Text description = CreateBodyText(contentObject.transform, string.Empty, 30);
+
+        var repairSection = new GameObject("RepairSection", typeof(RectTransform));
+        repairSection.transform.SetParent(contentObject.transform, false);
+
+        var repairLayout = repairSection.AddComponent<VerticalLayoutGroup>();
+        repairLayout.spacing = 8f;
+        repairLayout.padding = new RectOffset(20, 20, 16, 16);
+        repairLayout.childControlWidth = true;
+        repairLayout.childControlHeight = true;
+        repairLayout.childForceExpandWidth = true;
+        repairLayout.childForceExpandHeight = false;
+        repairLayout.childAlignment = TextAnchor.UpperLeft;
+
+        repairSection.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        ApplyRoundedBackground(repairSection.AddComponent<Image>(), new Color(0.12f, 0.15f, 0.2f, 1f));
+
+        Text repairLabel = CreateBodyText(repairSection.transform, "处理记录", 26);
+        repairLabel.color = new Color(0.68f, 0.74f, 0.82f);
+
+        Text repairText = CreateBodyText(repairSection.transform, string.Empty, 30);
+
+        Text timelineLabel = CreateBodyText(contentObject.transform, "流转记录", 26);
+        timelineLabel.color = new Color(0.68f, 0.74f, 0.82f);
+
+        Text timelineText = CreateBodyText(contentObject.transform, string.Empty, 28);
+        timelineText.color = new Color(0.78f, 0.84f, 0.92f);
+
+        Button completeButton = CreateFixedButton(
+            panel.transform, "完成",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f),
+            new Vector2(300f, 100f), new Color(0.14f, 0.39f, 0.92f, 1f));
+
+        Button returnButton = CreateFixedButton(
+            panel.transform, "退回",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(360f, 40f),
+            new Vector2(300f, 100f), new Color(0.5f, 0.28f, 0.28f, 1f));
+
+        Button withdrawButton = CreateFixedButton(
+            panel.transform, "撤回",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(680f, 40f),
+            new Vector2(300f, 100f), new Color(0.3f, 0.32f, 0.38f, 1f));
+
+        Text statusMessage = CreateText(panel.transform, string.Empty, 28, false);
+        var msgRect = statusMessage.rectTransform;
+        msgRect.anchorMin = new Vector2(0f, 0f);
+        msgRect.anchorMax = new Vector2(1f, 0f);
+        msgRect.pivot = new Vector2(0.5f, 0f);
+        msgRect.anchoredPosition = new Vector2(0f, 155f);
+        msgRect.sizeDelta = new Vector2(-80f, 60f);
+        statusMessage.alignment = TextAnchor.MiddleLeft;
+
+        var detail = panel.AddComponent<IssueDetailPanel>();
+        detail.panel = panel;
+        detail.titleText = title;
+        detail.statusText = status;
+        detail.metaText = meta;
+        detail.descriptionText = description;
+        detail.repairSection = repairSection;
+        detail.repairText = repairText;
+        detail.timelineText = timelineText;
+        detail.completeButton = completeButton;
+        detail.returnButton = returnButton;
+        detail.withdrawButton = withdrawButton;
+        detail.closeButton = closeButton;
+        detail.statusMessage = statusMessage;
+
+        return detail;
+    }
+
+    /// <summary>滚动区里的一段文字，高度随内容自适应。</summary>
+    private static Text CreateBodyText(Transform parent, string content, int fontSize)
+    {
+        Text text = CreateText(parent, content, fontSize, false);
+        text.alignment = TextAnchor.UpperLeft;
+
+        text.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        return text;
+    }
+
+    /// <summary>
+    /// 写处理记录 / 退回原因的弹窗。两个场景共用一个，标题和占位文字在打开时改。
+    /// </summary>
+    private static ReasonDialog CreateReasonDialog(Transform canvas)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "ReasonDialog", new Color(0f, 0f, 0f, 0.75f), true);
+
+        var card = new GameObject("Card", typeof(RectTransform));
+        card.transform.SetParent(panel.transform, false);
+
+        var cardRect = card.GetComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(880f, 640f);
+
+        ApplyRoundedBackground(card.AddComponent<Image>(), new Color(0.09f, 0.11f, 0.15f, 1f));
+
+        Text title = CreateText(card.transform, string.Empty, 36, false);
+        SetTopStretch(title.rectTransform, -48f, 60f);
+        title.fontStyle = FontStyle.Bold;
+
+        InputField input = CreateInputField(card.transform, string.Empty, -140f, 300f);
+        input.lineType = InputField.LineType.MultiLineNewline;
+        input.textComponent.alignment = TextAnchor.UpperLeft;
+
+        Text hint = CreateText(card.transform, string.Empty, 26, false);
+        SetTopStretch(hint.rectTransform, -462f, 50f);
+        hint.color = new Color(1f, 0.55f, 0.5f);
+
+        Button cancelButton = CreateFixedButton(
+            card.transform, "取消",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 36f),
+            new Vector2(380f, 96f), new Color(0.22f, 0.25f, 0.31f, 1f));
+
+        Button confirmButton = CreateFixedButton(
+            card.transform, "确定",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(460f, 36f),
+            new Vector2(380f, 96f), new Color(0.14f, 0.39f, 0.92f, 1f));
+
+        var dialog = panel.AddComponent<ReasonDialog>();
+        dialog.panel = panel;
+        dialog.titleText = title;
+        dialog.input = input;
+        dialog.hintText = hint;
+        dialog.confirmButton = confirmButton;
+        dialog.cancelButton = cancelButton;
+
+        return dialog;
     }
 
     private static IssueForm CreateFormPanel(Transform canvas)

@@ -57,7 +57,7 @@ public class LoginResponse
     public string role;
 }
 
-/// <summary>列表里每条问题只取展示需要的字段。</summary>
+/// <summary>列表与详情共用的问题字段。</summary>
 [Serializable]
 public class IssueSummary
 {
@@ -68,6 +68,44 @@ public class IssueSummary
     public string status;
     public string reporter;
     public string createdAt;
+
+    // AI 分诊与派单结果
+    public string category;
+    public string assignee;
+    public string submittedAt;
+    public string repairNote;
+}
+
+/// <summary>一条流转留痕。</summary>
+[Serializable]
+public class IssueEventItem
+{
+    public string actor;
+    public string action;
+    public string fromStatus;
+    public string toStatus;
+    public string note;
+    public string createdAt;
+}
+
+/// <summary>
+/// 详情与流转接口都返回 {issue, events}。
+/// 对象内的数组 JsonUtility 能直接解析，只有顶层裸数组才需要包一层。
+/// </summary>
+[Serializable]
+public class IssueDetailResponse
+{
+    public IssueSummary issue;
+    public IssueEventItem[] events;
+}
+
+/// <summary>一次流转动作。不同 action 用到的字段不同，多传的空字段后端会忽略。</summary>
+[Serializable]
+public class ActionPayload
+{
+    public string action;
+    public string assignee;
+    public string note;
 }
 
 /// <summary>JsonUtility 不能解析顶层数组，用它包一层。</summary>
@@ -179,6 +217,110 @@ public static class ApiClient
             IssueCollection parsed = JsonUtility.FromJson<IssueCollection>(json);
 
             onSuccess(parsed != null && parsed.items != null ? parsed.items : new IssueSummary[0]);
+        }
+    }
+
+    /// <summary>取一条工单的详情（含 AI 判定、处理人、修复记录与流转留痕）。</summary>
+    public static IEnumerator GetIssue(
+        string baseUrl,
+        string token,
+        string id,
+        Action<IssueDetailResponse> onSuccess,
+        Action<string> onError)
+    {
+        string url = baseUrl.TrimEnd('/') + "/issues/" + id;
+
+        using (var request = UnityWebRequest.Get(url))
+        {
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Authorization", "Bearer " + token);
+            request.timeout = 10;
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.ConnectionError)
+            {
+                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                yield break;
+            }
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                if (request.responseCode == 401)
+                {
+                    NotifyUnauthorized();
+                }
+
+                onError(ReadServerMessage(request));
+                yield break;
+            }
+
+            IssueDetailResponse detail = JsonUtility.FromJson<IssueDetailResponse>(request.downloadHandler.text);
+            if (detail == null || detail.issue == null)
+            {
+                onError("服务器返回的工单格式不对");
+                yield break;
+            }
+
+            onSuccess(detail);
+        }
+    }
+
+    /// <summary>执行一次流转动作（派单、退回、提交、验收…）。成功返回更新后的工单与全量留痕。</summary>
+    public static IEnumerator PerformAction(
+        string baseUrl,
+        string token,
+        string id,
+        string action,
+        string assignee,
+        string note,
+        Action<IssueDetailResponse> onSuccess,
+        Action<string> onError)
+    {
+        var payload = new ActionPayload
+        {
+            action = action,
+            assignee = assignee ?? string.Empty,
+            note = note ?? string.Empty,
+        };
+
+        string url = baseUrl.TrimEnd('/') + "/issues/" + id + "/actions";
+
+        using (var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
+        {
+            request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(JsonUtility.ToJson(payload)));
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("Authorization", "Bearer " + token);
+            request.timeout = 10;
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.ConnectionError)
+            {
+                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                yield break;
+            }
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                if (request.responseCode == 401)
+                {
+                    NotifyUnauthorized();
+                }
+
+                onError(ReadServerMessage(request));
+                yield break;
+            }
+
+            IssueDetailResponse detail = JsonUtility.FromJson<IssueDetailResponse>(request.downloadHandler.text);
+            if (detail == null || detail.issue == null)
+            {
+                onError("服务器返回的工单格式不对");
+                yield break;
+            }
+
+            onSuccess(detail);
         }
     }
 
