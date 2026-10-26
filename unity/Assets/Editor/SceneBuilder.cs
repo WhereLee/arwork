@@ -12,32 +12,41 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.XR;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
-using UnityEngine.XR.ARCore;
 using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
 using UnityEngine.XR.Management;
 
 /// <summary>
-/// 批处理入口：配置 Android 参数、启用 ARCore、生成最小自检场景，可单独构建 APK。
-/// 用法：Unity.exe -batchmode -nographics -projectPath &lt;工程&gt; -buildTarget Android
-///        -executeMethod SceneBuilder.Build -quit -logFile &lt;日志&gt;
+/// 批处理入口：生成巡检 AR 场景、构建 APK。
+/// 注意：XR Plug-in Management 的配置必须由编辑器界面勾选一次，这里只读取、不重建。
 /// </summary>
 public static class SceneBuilder
 {
     private const string ScenePath = "Assets/Scenes/Main.unity";
     private const string ApkPath = "Builds/arwork.apk";
 
-    [MenuItem("ARWork/1. 配置并生成场景")]
-    public static void Build()
+    /// <summary>界面元素引用，交给 ARFlowController 连线。</summary>
+    private sealed class UIRefs
     {
-        ConfigurePlayer();
-        EnableARCoreLoader();
-        ConfigureNativePlugins();
-        CreateScene();
-        AssetDatabase.SaveAssets();
-        Debug.Log("SCENE_BUILT: " + ScenePath);
+        public GameObject guidePanel;
+        public Button horizontalButton;
+        public Button verticalButton;
+
+        public GameObject hudPanel;
+        public Text statusText;
+        public Text toastText;
+        public Button exitButton;
+        public Button hudHorizontalButton;
+        public Button hudVerticalButton;
+
+        public GameObject confirmPanel;
+        public Button confirmYesButton;
+        public Button confirmNoButton;
+
+        public IssueForm form;
     }
 
-    [MenuItem("ARWork/5. 生成巡检场景（平面检测 + 放置标记）")]
+    [MenuItem("ARWork/1. 生成巡检场景")]
     public static void BuildPlayground()
     {
         ConfigurePlayer();
@@ -46,31 +55,66 @@ public static class SceneBuilder
         Directory.CreateDirectory("Assets/Materials");
         Directory.CreateDirectory("Assets/Prefabs");
 
+        RemoveLegacyAssets();
+
         Material planeMaterial = CreatePlaneMaterial();
-        Material markerMaterial = CreateMaterial(
-            "Assets/Materials/MarkerMaterial.mat", "Unlit/Color", new Color(1f, 0.45f, 0.1f));
+        Material markerBodyMaterial = CreateMaterial(
+            "Assets/Materials/MarkerBodyMaterial.mat", "Unlit/Color", new Color(0.93f, 0.95f, 0.97f));
+        // 纯白方框：和淡白网格同色系，但不透不混，一眼能分开
+        Material reticleMaterial = CreateMaterial(
+            "Assets/Materials/ReticleMaterial.mat", "Unlit/Color", new Color(1f, 1f, 1f, 1f));
+
+        Texture2D plateFillTexture;
+        Texture2D plateInkTexture;
+        CreateWarningTextures(out plateFillTexture, out plateInkTexture);
+
+        Material plateFillMaterial = CreatePlateMaterial(
+            "Assets/Materials/PlateFillMaterial.mat", plateFillTexture, new Color(1f, 0.82f, 0.08f));
+        Material plateInkMaterial = CreatePlateMaterial(
+            "Assets/Materials/PlateInkMaterial.mat", plateInkTexture, new Color(0.06f, 0.06f, 0.07f));
 
         GameObject planePrefab = CreatePlanePrefab(planeMaterial);
-        GameObject markerPrefab = CreateMarkerPrefab(markerMaterial);
+        GameObject markerPrefab = CreateMarkerPrefab(markerBodyMaterial, plateFillMaterial, plateInkMaterial);
 
-        CreateArScene(planePrefab, markerPrefab);
+        CreateArScene(planePrefab, markerPrefab, reticleMaterial);
 
         AssetDatabase.SaveAssets();
         Debug.Log("PLAYGROUND_BUILT: " + ScenePath);
     }
 
-    /// <summary>
-    /// 手机要访问电脑上的后端，Android 9 起默认禁止明文 HTTP，这里放开。
-    /// </summary>
+    [MenuItem("ARWork/2. 构建 APK")]
+    public static void BuildApk()
+    {
+        EnsurePreloadedXR();
+        Directory.CreateDirectory("Builds");
+
+        var options = new BuildPlayerOptions
+        {
+            scenes = new[] { ScenePath },
+            locationPathName = ApkPath,
+            target = BuildTarget.Android,
+            options = BuildOptions.None
+        };
+
+        BuildReport report = BuildPipeline.BuildPlayer(options);
+        BuildSummary summary = report.summary;
+        Debug.Log("BUILD_RESULT: " + summary.result + " size=" + summary.totalSize);
+
+        if (summary.result != BuildResult.Succeeded)
+        {
+            EditorApplication.Exit(1);
+        }
+    }
+
+    /// <summary>手机要访问电脑上的后端，Android 9 起默认禁止明文 HTTP，这里放开。</summary>
     private static void ConfigureNetworking()
     {
         PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
         Debug.Log("NETWORK_CONFIGURED");
     }
 
-    /// <summary>
-    /// 平面可视化的透明材质。用项目内 shader，不依赖内置 shader 的打包与背面剔除行为。
-    /// </summary>
+    // ---------------------------------------------------------------- 资源
+
     private static Material CreatePlaneMaterial()
     {
         const string materialPath = "Assets/Materials/PlaneMaterial.mat";
@@ -94,7 +138,7 @@ public static class SceneBuilder
             material.shader = shader;
         }
 
-        material.color = new Color(0.25f, 0.65f, 1f, 0.22f);
+        material.color = new Color(1f, 1f, 1f, 0.22f);
         EditorUtility.SetDirty(material);
         return material;
     }
@@ -104,7 +148,6 @@ public static class SceneBuilder
         var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (existing != null)
         {
-            // 重跑时同步 shader 与颜色，避免沿用旧设置
             Shader target = Shader.Find(shaderName);
             if (target != null && existing.shader != target)
             {
@@ -154,44 +197,319 @@ public static class SceneBuilder
         return prefab;
     }
 
-    private static GameObject CreateMarkerPrefab(Material material)
+    /// <summary>换成警示牌后，旧的立方体标记、针形标记和橙色材质都不再使用。</summary>
+    private static void RemoveLegacyAssets()
     {
-        const string path = "Assets/Prefabs/Marker.prefab";
-        const float markerSize = 0.18f;
-
-        var existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-        if (existing != null)
+        string[] legacy =
         {
-            // 重跑时同步尺寸与材质，避免沿用旧 prefab
-            GameObject contents = PrefabUtility.LoadPrefabContents(path);
-            contents.transform.localScale = Vector3.one * markerSize;
+            "Assets/Prefabs/Marker.prefab",
+            "Assets/Prefabs/MarkerPin.prefab",
+            "Assets/Materials/MarkerMaterial.mat",
+        };
 
-            var existingRenderer = contents.GetComponent<MeshRenderer>();
-            if (existingRenderer != null && material != null)
+        foreach (string path in legacy)
+        {
+            if (AssetDatabase.LoadAssetAtPath<Object>(path) != null)
             {
-                existingRenderer.sharedMaterial = material;
+                AssetDatabase.DeleteAsset(path);
             }
+        }
+    }
 
-            PrefabUtility.SaveAsPrefabAsset(contents, path);
-            PrefabUtility.UnloadPrefabContents(contents);
-            return AssetDatabase.LoadAssetAtPath<GameObject>(path);
+    /// <summary>
+    /// 警示牌造型的标记：贴面圆盘标出落点，短杆把牌面撑起，
+    /// 牌面是「黄底 + 黑边 + 感叹号」，始终正对镜头。
+    /// 黄底单独一层，已上报时只换这一层的颜色，黑边不动。
+    /// </summary>
+    private static GameObject CreateMarkerPrefab(
+        Material bodyMaterial, Material plateFillMaterial, Material plateInkMaterial)
+    {
+        const string path = "Assets/Prefabs/MarkerSign.prefab";
+
+        const float baseDiameter = 0.1f;
+        const float baseThickness = 0.008f;
+        const float stemDiameter = 0.012f;
+        const float stemHeight = 0.06f;
+        const float plateSize = 0.12f;
+
+        // 先放一个空壳占住路径，保证后续重跑时场景里的引用不丢
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(path) == null)
+        {
+            var seed = new GameObject("Marker");
+            PrefabUtility.SaveAsPrefabAsset(seed, path);
+            Object.DestroyImmediate(seed);
         }
 
-        GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        cube.name = "Marker";
-        cube.transform.localScale = Vector3.one * markerSize;
+        GameObject contents = PrefabUtility.LoadPrefabContents(path);
+
+        for (int i = contents.transform.childCount - 1; i >= 0; i--)
+        {
+            Object.DestroyImmediate(contents.transform.GetChild(i).gameObject);
+        }
+
+        // 根物体保持单位缩放，尺寸全交给子物体，放置时根直接落在命中点
+        contents.transform.localScale = Vector3.one;
+
+        // 牌子绕自身底部转，杆顶就是牌面下边中点；若绕中心转，牌面一倾斜就会离开杆
+        float plateBottomY = baseThickness + stemHeight;
+
+        // Cylinder 原始高度是 2，缩放取实际高度的一半
+        CreatePrimitivePart(contents.transform, "Base", PrimitiveType.Cylinder,
+            new Vector3(0f, baseThickness * 0.5f, 0f),
+            new Vector3(baseDiameter, baseThickness * 0.5f, baseDiameter), bodyMaterial);
+
+        CreatePrimitivePart(contents.transform, "Stem", PrimitiveType.Cylinder,
+            new Vector3(0f, baseThickness + stemHeight * 0.5f, 0f),
+            new Vector3(stemDiameter, stemHeight * 0.5f, stemDiameter), bodyMaterial);
+
+        var plate = new GameObject("Plate");
+        plate.transform.SetParent(contents.transform, false);
+        plate.transform.localPosition = new Vector3(0f, plateBottomY, 0f);
+        plate.AddComponent<MarkerBillboard>();
+
+        // 黑边要在黄底前面，沿 Quad 正面方向错开一点，避免深度打架
+        CreatePrimitivePart(plate.transform, "Fill", PrimitiveType.Quad,
+            new Vector3(0f, plateSize * 0.5f, 0f), Vector3.one * plateSize, plateFillMaterial);
+
+        CreatePrimitivePart(plate.transform, "Ink", PrimitiveType.Quad,
+            new Vector3(0f, plateSize * 0.5f, -0.0006f), Vector3.one * plateSize, plateInkMaterial);
+
+        PrefabUtility.SaveAsPrefabAsset(contents, path);
+        PrefabUtility.UnloadPrefabContents(contents);
+
+        return AssetDatabase.LoadAssetAtPath<GameObject>(path);
+    }
+
+    /// <summary>
+    /// 程序生成牌面贴图：一张三角形黄底，一张黑边加感叹号。
+    /// 两张都只存白色形状和透明度，颜色交给材质，换色不用重新生成。
+    /// </summary>
+    private static void CreateWarningTextures(out Texture2D fill, out Texture2D ink)
+    {
+        const int size = 512;
+        const int samples = 4;
+        // 三边等宽的边框：按到边的距离判断。若按重心等比例缩，顶角会明显变粗
+        const float borderWidth = 0.055f;
+
+        var top = new Vector2(0.5f, 0.955f);
+        var left = new Vector2(0.045f, 0.08f);
+        var right = new Vector2(0.955f, 0.08f);
+
+        var fillPixels = new Color32[size * size];
+        var inkPixels = new Color32[size * size];
+        int total = samples * samples;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int fillHits = 0;
+                int inkHits = 0;
+
+                for (int sy = 0; sy < samples; sy++)
+                {
+                    for (int sx = 0; sx < samples; sx++)
+                    {
+                        var p = new Vector2(
+                            (x + (sx + 0.5f) / samples) / size,
+                            (y + (sy + 0.5f) / samples) / size);
+
+                        if (!InsideTriangle(p, top, left, right))
+                        {
+                            continue;
+                        }
+
+                        fillHits++;
+
+                        if (DistanceToTriangleEdge(p, top, left, right) < borderWidth
+                            || InsideExclamation(p))
+                        {
+                            inkHits++;
+                        }
+                    }
+                }
+
+                fillPixels[y * size + x] = ShapePixel(fillHits, total);
+                inkPixels[y * size + x] = ShapePixel(inkHits, total);
+            }
+        }
+
+        fill = SaveTexture("Assets/Textures/MarkerPlateFill.png", fillPixels, size);
+        ink = SaveTexture("Assets/Textures/MarkerPlateInk.png", inkPixels, size);
+    }
+
+    private static Color32 ShapePixel(int hits, int total)
+    {
+        var alpha = (byte)Mathf.RoundToInt(255f * hits / total);
+        return new Color32(255, 255, 255, alpha);
+    }
+
+    private static Texture2D SaveTexture(string path, Color32[] pixels, int size)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.SetPixels32(pixels);
+        texture.Apply();
+
+        File.WriteAllBytes(path, texture.EncodeToPNG());
+        Object.DestroyImmediate(texture);
+
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+        var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+        if (importer != null)
+        {
+            importer.textureType = TextureImporterType.Default;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = true;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.filterMode = FilterMode.Bilinear;
+            importer.maxTextureSize = size;
+            importer.SaveAndReimport();
+        }
+
+        return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+    }
+
+    private static Material CreatePlateMaterial(string path, Texture2D texture, Color color)
+    {
+        Shader shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/MarkerPlate.shader");
+        if (shader == null)
+        {
+            Debug.LogWarning("PLATE_SHADER_MISSING");
+            shader = Shader.Find("Unlit/Transparent");
+        }
+
+        var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (material == null)
+        {
+            material = new Material(shader);
+            AssetDatabase.CreateAsset(material, path);
+        }
+        else if (material.shader != shader)
+        {
+            material.shader = shader;
+        }
+
+        material.mainTexture = texture;
+        material.color = color;
+        EditorUtility.SetDirty(material);
+
+        return material;
+    }
+
+    private static float EdgeSign(Vector2 p, Vector2 a, Vector2 b)
+    {
+        return (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+    }
+
+    private static bool InsideTriangle(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        float d1 = EdgeSign(p, a, b);
+        float d2 = EdgeSign(p, b, c);
+        float d3 = EdgeSign(p, c, a);
+
+        bool hasNegative = d1 < 0f || d2 < 0f || d3 < 0f;
+        bool hasPositive = d1 > 0f || d2 > 0f || d3 > 0f;
+
+        return !(hasNegative && hasPositive);
+    }
+
+    private static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        Vector2 ab = b - a;
+        float lengthSq = ab.sqrMagnitude;
+
+        if (lengthSq < 0.000001f)
+        {
+            return Vector2.Distance(p, a);
+        }
+
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / lengthSq);
+        return Vector2.Distance(p, a + ab * t);
+    }
+
+    private static float DistanceToTriangleEdge(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        float d1 = DistanceToSegment(p, a, b);
+        float d2 = DistanceToSegment(p, b, c);
+        float d3 = DistanceToSegment(p, c, a);
+
+        return Mathf.Min(d1, Mathf.Min(d2, d3));
+    }
+
+    private static bool InsideExclamation(Vector2 p)
+    {
+        // 竖条
+        if (p.x >= 0.465f && p.x <= 0.535f && p.y >= 0.36f && p.y <= 0.68f)
+        {
+            return true;
+        }
+
+        // 下面那个点
+        float dx = p.x - 0.5f;
+        float dy = p.y - 0.268f;
+        return dx * dx + dy * dy <= 0.042f * 0.042f;
+    }
+
+    /// <summary>
+    /// 屏幕中心的方框指示器。只有一个，直接建在场景里，不走预制体。
+    /// 父物体 Y 轴对齐平面法线，四条边因此落在平面本身上。
+    /// </summary>
+    private static ARReticle CreateReticle(
+        Material material, ARRaycastManager raycastManager, ARPlaneManager planeManager)
+    {
+        const float size = 0.1f;
+        const float thickness = 0.006f;
+        const float depth = 0.004f;
+
+        float half = size * 0.5f;
+
+        var root = new GameObject("Reticle");
+
+        var visual = new GameObject("Visual");
+        visual.transform.SetParent(root.transform, false);
+        visual.SetActive(false);
+
+        CreatePrimitivePart(visual.transform, "Top", PrimitiveType.Cube,
+            new Vector3(0f, 0f, half), new Vector3(size + thickness, depth, thickness), material);
+        CreatePrimitivePart(visual.transform, "Bottom", PrimitiveType.Cube,
+            new Vector3(0f, 0f, -half), new Vector3(size + thickness, depth, thickness), material);
+        CreatePrimitivePart(visual.transform, "Left", PrimitiveType.Cube,
+            new Vector3(-half, 0f, 0f), new Vector3(thickness, depth, size + thickness), material);
+        CreatePrimitivePart(visual.transform, "Right", PrimitiveType.Cube,
+            new Vector3(half, 0f, 0f), new Vector3(thickness, depth, size + thickness), material);
+
+        var reticle = root.AddComponent<ARReticle>();
+        reticle.raycastManager = raycastManager;
+        reticle.planeManager = planeManager;
+        reticle.visual = visual;
+
+        return reticle;
+    }
+
+    /// <summary>场景里的纯视觉零件，统一去掉碰撞体——射线走 ARRaycastManager，不用物理。</summary>
+    private static void CreatePrimitivePart(
+        Transform parent, string name, PrimitiveType type, Vector3 localPosition, Vector3 scale, Material material)
+    {
+        GameObject part = GameObject.CreatePrimitive(type);
+        part.name = name;
+        part.transform.SetParent(parent, false);
+        part.transform.localPosition = localPosition;
+        part.transform.localScale = scale;
+
+        Object.DestroyImmediate(part.GetComponent<Collider>());
 
         if (material != null)
         {
-            cube.GetComponent<MeshRenderer>().sharedMaterial = material;
+            part.GetComponent<MeshRenderer>().sharedMaterial = material;
         }
-
-        GameObject prefab = PrefabUtility.SaveAsPrefabAsset(cube, path);
-        Object.DestroyImmediate(cube);
-        return prefab;
     }
 
-    private static void CreateArScene(GameObject planePrefab, GameObject markerPrefab)
+    // ---------------------------------------------------------------- 场景
+
+    private static void CreateArScene(GameObject planePrefab, GameObject markerPrefab, Material reticleMaterial)
     {
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -206,6 +524,8 @@ public static class SceneBuilder
 
         var planeManager = originObject.AddComponent<ARPlaneManager>();
         planeManager.planePrefab = planePrefab;
+        // 水平和垂直一直检测，界面上的切换只决定哪一类画出来
+        planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
 
         // 面积过小的平面不显示，避免零碎网格在屏幕上闪
         var planeFilter = originObject.AddComponent<ARPlaneFilter>();
@@ -226,7 +546,6 @@ public static class SceneBuilder
         camera.nearClipPlane = 0.1f;
         camera.farClipPlane = 1000f;
 
-        // XROrigin 需要知道哪个相机是 AR 相机，以及地面偏移对象
         xrOrigin.Camera = camera;
         xrOrigin.CameraFloorOffsetObject = offsetObject;
 
@@ -247,23 +566,45 @@ public static class SceneBuilder
         PlaceMarker placer = placerObject.AddComponent<PlaceMarker>();
         placer.raycastManager = raycastManager;
         placer.markerPrefab = markerPrefab;
+        placer.planeManager = planeManager;
 
-        var selfTestObject = new GameObject("Self Test");
-        selfTestObject.AddComponent<ARSelfTest>();
+        // 落在平面上的方框，指示下一刀会放在哪
+        ARReticle reticle = CreateReticle(reticleMaterial, raycastManager, planeManager);
 
-        Canvas hudCanvas = CreateHud(planeManager, placer);
-        placer.issueForm = CreateIssueForm(hudCanvas.transform);
-        CreateGuide(hudCanvas.transform);
+        Canvas canvas = CreateCanvas();
+        UIRefs ui = CreateUI(canvas.transform);
+
+        var flowObject = new GameObject("AR Flow");
+        var flow = flowObject.AddComponent<ARFlowController>();
+        flow.planeManager = planeManager;
+        flow.planeFilter = planeFilter;
+        flow.raycastManager = raycastManager;
+        flow.placer = placer;
+        flow.reticle = reticle;
+        flow.form = ui.form;
+        flow.guidePanel = ui.guidePanel;
+        flow.hudPanel = ui.hudPanel;
+        flow.confirmPanel = ui.confirmPanel;
+        flow.statusText = ui.statusText;
+        flow.toastText = ui.toastText;
+        flow.exitButton = ui.exitButton;
+        flow.horizontalButton = ui.horizontalButton;
+        flow.verticalButton = ui.verticalButton;
+        flow.hudHorizontalButton = ui.hudHorizontalButton;
+        flow.hudVerticalButton = ui.hudVerticalButton;
+        flow.confirmYesButton = ui.confirmYesButton;
+        flow.confirmNoButton = ui.confirmNoButton;
+
+        placer.flow = flow;
 
         Directory.CreateDirectory("Assets/Scenes");
         EditorSceneManager.SaveScene(scene, ScenePath);
         EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
     }
 
-    /// <summary>
-    /// 屏幕 HUD：底部状态提示 + 右下角清除按钮，另带必要的 EventSystem。
-    /// </summary>
-    private static Canvas CreateHud(ARPlaneManager planeManager, PlaceMarker placer)
+    // ---------------------------------------------------------------- 界面
+
+    private static Canvas CreateCanvas()
     {
         var eventSystemObject = new GameObject("EventSystem");
         eventSystemObject.AddComponent<EventSystem>();
@@ -279,9 +620,57 @@ public static class SceneBuilder
         scaler.matchWidthOrHeight = 0.5f;
 
         canvasObject.AddComponent<GraphicRaycaster>();
+        canvasObject.AddComponent<ChineseFontApplier>();
+
+        return canvas;
+    }
+
+    private static UIRefs CreateUI(Transform canvas)
+    {
+        var refs = new UIRefs();
+
+        refs.guidePanel = CreateGuidePanel(canvas, refs);
+        refs.hudPanel = CreateHudPanel(canvas, refs);
+        refs.confirmPanel = CreateConfirmPanel(canvas, refs);
+        refs.form = CreateFormPanel(canvas);
+
+        return refs;
+    }
+
+    private static GameObject CreateGuidePanel(Transform canvas, UIRefs refs)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "Guide", new Color(0.04f, 0.06f, 0.09f, 0.98f), false);
+
+        Text title = CreateText(panel.transform, "园区巡检 AR", 56, false);
+        SetTopStretch(title.rectTransform, -240f, 120f);
+        title.fontStyle = FontStyle.Bold;
+
+        Text steps = CreateText(panel.transform, string.Empty, 34, false);
+        SetTopStretch(steps.rectTransform, -400f, 420f);
+        steps.alignment = TextAnchor.UpperLeft;
+        steps.lineSpacing = 1.6f;
+        steps.color = new Color(0.78f, 0.84f, 0.92f);
+        steps.text = "1. 选择要标记的表面\n2. 缓慢移动手机扫描\n3. 点击表面，放置标记并上报";
+
+        refs.horizontalButton = CreateFixedButton(
+            panel.transform, "水平面 · 桌面或地面",
+            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 300f),
+            new Vector2(700f, 130f), new Color(0.14f, 0.39f, 0.92f, 1f));
+
+        refs.verticalButton = CreateFixedButton(
+            panel.transform, "垂直面 · 墙面",
+            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 140f),
+            new Vector2(700f, 130f), new Color(0.2f, 0.55f, 0.45f, 1f));
+
+        return panel;
+    }
+
+    private static GameObject CreateHudPanel(Transform canvas, UIRefs refs)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "HUD", Color.clear, false);
 
         var hintObject = new GameObject("Hint", typeof(RectTransform));
-        hintObject.transform.SetParent(canvasObject.transform, false);
+        hintObject.transform.SetParent(panel.transform, false);
 
         var hintRect = hintObject.GetComponent<RectTransform>();
         hintRect.anchorMin = new Vector2(0f, 0f);
@@ -292,39 +681,83 @@ public static class SceneBuilder
 
         var hintImage = hintObject.AddComponent<Image>();
         hintImage.color = new Color(0f, 0f, 0f, 0.55f);
+        // 提示条只做展示，不能拦截 AR 场景的点击
+        hintImage.raycastTarget = false;
 
-        Text hintText = CreateText(hintObject.transform, "Move your phone slowly to scan a flat surface", 34);
+        refs.statusText = CreateText(hintObject.transform, "正在扫描，请缓慢移动手机", 34);
 
-        var buttonObject = new GameObject("ClearButton", typeof(RectTransform));
-        buttonObject.transform.SetParent(canvasObject.transform, false);
+        // 右上角：切换表面 + 退出
+        refs.hudHorizontalButton = CreateFixedButton(
+            panel.transform, "水平",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-420f, -30f),
+            new Vector2(170f, 90f), new Color(0.25f, 0.28f, 0.34f, 0.95f));
 
-        var buttonRect = buttonObject.GetComponent<RectTransform>();
-        buttonRect.anchorMin = new Vector2(1f, 1f);
-        buttonRect.anchorMax = new Vector2(1f, 1f);
-        buttonRect.pivot = new Vector2(1f, 1f);
-        buttonRect.anchoredPosition = new Vector2(-30f, -30f);
-        buttonRect.sizeDelta = new Vector2(220f, 90f);
+        refs.hudVerticalButton = CreateFixedButton(
+            panel.transform, "垂直",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-230f, -30f),
+            new Vector2(170f, 90f), new Color(0.25f, 0.28f, 0.34f, 0.95f));
 
-        var buttonImage = buttonObject.AddComponent<Image>();
-        buttonImage.color = new Color(0.14f, 0.39f, 0.92f, 0.92f);
+        refs.exitButton = CreateFixedButton(
+            panel.transform, "退出",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -30f),
+            new Vector2(170f, 90f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
 
-        var clearButton = buttonObject.AddComponent<Button>();
-        CreateText(buttonObject.transform, "CLEAR", 32);
+        // 临时提示，默认隐藏
+        refs.toastText = CreateText(panel.transform, string.Empty, 32, false);
+        var toastRect = refs.toastText.rectTransform;
+        toastRect.anchorMin = new Vector2(0.5f, 0.5f);
+        toastRect.anchorMax = new Vector2(0.5f, 0.5f);
+        toastRect.pivot = new Vector2(0.5f, 0.5f);
+        toastRect.anchoredPosition = new Vector2(0f, -170f);
+        toastRect.sizeDelta = new Vector2(860f, 110f);
+        refs.toastText.color = new Color(1f, 0.9f, 0.6f);
+        refs.toastText.gameObject.SetActive(false);
 
-        var hudObject = new GameObject("HUD");
-        var hud = hudObject.AddComponent<ARHud>();
-        hud.planeManager = planeManager;
-        hud.placer = placer;
-        hud.hintText = hintText;
-        hud.clearButton = clearButton;
-
-        return canvas;
+        return panel;
     }
 
     /// <summary>
-    /// 标记落下后弹出的上报表单：标题 / 描述 / 优先级 / 服务器地址 / 提交。
+    /// 退出确认框：退出会清空本轮标记，先问一句再动。
     /// </summary>
-    private static IssueForm CreateIssueForm(Transform canvas)
+    private static GameObject CreateConfirmPanel(Transform canvas, UIRefs refs)
+    {
+        GameObject panel = CreateFullScreenPanel(canvas, "Confirm", new Color(0f, 0f, 0f, 0.6f), true);
+
+        var boxObject = new GameObject("Box", typeof(RectTransform));
+        boxObject.transform.SetParent(panel.transform, false);
+
+        var boxRect = boxObject.GetComponent<RectTransform>();
+        boxRect.anchorMin = new Vector2(0.5f, 0.5f);
+        boxRect.anchorMax = new Vector2(0.5f, 0.5f);
+        boxRect.pivot = new Vector2(0.5f, 0.5f);
+        boxRect.sizeDelta = new Vector2(820f, 440f);
+
+        var boxImage = boxObject.AddComponent<Image>();
+        boxImage.color = new Color(0.1f, 0.12f, 0.16f, 1f);
+
+        Text message = CreateText(boxObject.transform, "退出会清空本轮所有标记\n确定要退出吗？", 34, false);
+        SetTopStretch(message.rectTransform, -70f, 190f);
+        message.alignment = TextAnchor.MiddleCenter;
+        message.lineSpacing = 1.4f;
+
+        var buttonRow = new GameObject("Buttons", typeof(RectTransform));
+        buttonRow.transform.SetParent(boxObject.transform, false);
+
+        var rowRect = buttonRow.GetComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0f, 0f);
+        rowRect.anchorMax = new Vector2(1f, 0f);
+        rowRect.pivot = new Vector2(0.5f, 0f);
+        rowRect.anchoredPosition = new Vector2(0f, 50f);
+        rowRect.sizeDelta = new Vector2(-60f, 110f);
+
+        refs.confirmNoButton = CreateRowButton(buttonRow.transform, "留下", 0f, 2f);
+        refs.confirmYesButton = CreateRowButton(buttonRow.transform, "退出", 1f, 2f);
+        refs.confirmYesButton.image.color = new Color(0.68f, 0.26f, 0.26f, 1f);
+
+        return panel;
+    }
+
+    private static IssueForm CreateFormPanel(Transform canvas)
     {
         var panelObject = new GameObject("IssueForm", typeof(RectTransform));
         panelObject.transform.SetParent(canvas, false);
@@ -333,80 +766,158 @@ public static class SceneBuilder
         panelRect.anchorMin = new Vector2(0f, 0f);
         panelRect.anchorMax = new Vector2(1f, 0f);
         panelRect.pivot = new Vector2(0.5f, 0f);
-        panelRect.anchoredPosition = new Vector2(0f, 30f);
-        panelRect.sizeDelta = new Vector2(-40f, 640f);
+        panelRect.anchoredPosition = new Vector2(0f, 24f);
+        // 只占屏幕下方约三成，保证准星和刚放的标记露在表单上方
+        panelRect.sizeDelta = new Vector2(-40f, 560f);
 
         var panelImage = panelObject.AddComponent<Image>();
-        panelImage.color = new Color(0.06f, 0.08f, 0.11f, 0.94f);
+        panelImage.color = new Color(0.06f, 0.08f, 0.11f, 0.95f);
 
-        var coordObject = new GameObject("Coord", typeof(RectTransform));
-        coordObject.transform.SetParent(panelObject.transform, false);
-        SetTopStretch(coordObject.GetComponent<RectTransform>(), -20f, 46f);
-
-        var coordText = coordObject.AddComponent<Text>();
-        coordText.font = BuiltinFont();
-        coordText.fontSize = 28;
+        // 第一行左侧给出“位置已记录”的确认，右侧留给「设置」
+        var coordText = CreateText(panelObject.transform, "已记录标记位置", 28, false);
+        var coordRect = coordText.rectTransform;
+        coordRect.anchorMin = new Vector2(0f, 1f);
+        coordRect.anchorMax = new Vector2(1f, 1f);
+        coordRect.pivot = new Vector2(0.5f, 1f);
+        coordRect.offsetMin = new Vector2(20f, -54f);
+        coordRect.offsetMax = new Vector2(-180f, -14f);
         coordText.alignment = TextAnchor.MiddleLeft;
         coordText.color = new Color(0.7f, 0.85f, 1f);
-        coordText.text = "x 0.00   y 0.00   z 0.00";
 
-        InputField titleInput = CreateInputField(panelObject.transform, "Title (required)", -78f, 80f);
-        InputField descriptionInput = CreateInputField(panelObject.transform, "Description (optional)", -172f, 80f);
+        Button settingsButton = CreateFixedButton(
+            panelObject.transform, "设置",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-20f, -14f),
+            new Vector2(140f, 56f), new Color(0.22f, 0.25f, 0.31f, 1f));
 
+        InputField titleInput = CreateInputField(panelObject.transform, "问题标题（必填）", -66f, 76f);
+        InputField descriptionInput = CreateInputField(panelObject.transform, "问题描述（选填）", -150f, 76f);
+
+        // 优先级：左侧标题 + 三档按钮，避免“低 中 高”三个字没有来历
         var priorityRow = new GameObject("PriorityRow", typeof(RectTransform));
         priorityRow.transform.SetParent(panelObject.transform, false);
-        SetTopStretch(priorityRow.GetComponent<RectTransform>(), -266f, 80f);
+        SetTopStretch(priorityRow.GetComponent<RectTransform>(), -234f, 76f);
 
-        Button lowButton = CreateRowButton(priorityRow.transform, "LOW", 0f, 3f);
-        Button mediumButton = CreateRowButton(priorityRow.transform, "MEDIUM", 1f, 3f);
-        Button highButton = CreateRowButton(priorityRow.transform, "HIGH", 2f, 3f);
+        Text priorityLabel = CreateText(priorityRow.transform, "优先级", 28, false);
+        var labelRect = priorityLabel.rectTransform;
+        labelRect.anchorMin = new Vector2(0f, 0f);
+        labelRect.anchorMax = new Vector2(0.25f, 1f);
+        labelRect.offsetMin = new Vector2(12f, 0f);
+        labelRect.offsetMax = Vector2.zero;
+        priorityLabel.alignment = TextAnchor.MiddleLeft;
+        priorityLabel.color = new Color(0.78f, 0.84f, 0.92f);
 
-        InputField serverInput = CreateInputField(panelObject.transform, "Server", -360f, 70f);
+        Button lowButton = CreateRowButton(priorityRow.transform, "低", 1f, 4f);
+        Button mediumButton = CreateRowButton(priorityRow.transform, "中", 2f, 4f);
+        Button highButton = CreateRowButton(priorityRow.transform, "高", 3f, 4f);
+
+        // 服务器地址默认收起，只在排障时由「设置」展开
+        var serverRow = new GameObject("ServerRow", typeof(RectTransform));
+        serverRow.transform.SetParent(panelObject.transform, false);
+        SetTopStretch(serverRow.GetComponent<RectTransform>(), -318f, 66f);
+        serverRow.SetActive(false);
+
+        InputField serverInput = CreateInputField(serverRow.transform, "服务器地址", 0f, 66f);
+        ((RectTransform)serverInput.transform).sizeDelta = new Vector2(0f, 66f);
         serverInput.text = ApiClient.DefaultBaseUrl;
 
-        var submitObject = new GameObject("Submit", typeof(RectTransform));
-        submitObject.transform.SetParent(panelObject.transform, false);
-        SetTopStretch(submitObject.GetComponent<RectTransform>(), -444f, 92f);
+        var actionRow = new GameObject("ActionRow", typeof(RectTransform));
+        actionRow.transform.SetParent(panelObject.transform, false);
+        SetTopStretch(actionRow.GetComponent<RectTransform>(), -394f, 88f);
 
-        var submitImage = submitObject.AddComponent<Image>();
-        submitImage.color = new Color(0.14f, 0.39f, 0.92f, 1f);
+        Button cancelButton = CreateRowButton(actionRow.transform, "取消", 0f, 2f);
+        Button submitButton = CreateRowButton(actionRow.transform, "提交", 1f, 2f);
+        submitButton.image.color = new Color(0.14f, 0.39f, 0.92f, 1f);
 
-        var submitButton = submitObject.AddComponent<Button>();
-        CreateText(submitObject.transform, "SUBMIT", 32);
-
-        var statusObject = new GameObject("Status", typeof(RectTransform));
-        statusObject.transform.SetParent(panelObject.transform, false);
-        SetTopStretch(statusObject.GetComponent<RectTransform>(), -548f, 60f);
-
-        var statusText = statusObject.AddComponent<Text>();
-        statusText.font = BuiltinFont();
-        statusText.fontSize = 28;
+        var statusText = CreateText(panelObject.transform, string.Empty, 28, false);
+        SetTopStretch(statusText.rectTransform, -490f, 54f);
         statusText.alignment = TextAnchor.MiddleLeft;
-        statusText.color = Color.white;
-        statusText.text = string.Empty;
 
         var form = panelObject.AddComponent<IssueForm>();
         form.panel = panelObject;
         form.titleInput = titleInput;
         form.descriptionInput = descriptionInput;
         form.serverInput = serverInput;
+        form.settingsButton = settingsButton;
+        form.serverRow = serverRow;
         form.lowButton = lowButton;
         form.mediumButton = mediumButton;
         form.highButton = highButton;
         form.submitButton = submitButton;
+        form.cancelButton = cancelButton;
         form.coordText = coordText;
         form.statusText = statusText;
 
         return form;
     }
 
-    private static void SetTopStretch(RectTransform rect, float topOffset, float height)
+    // ---------------------------------------------------------------- 界面辅助
+
+    private static GameObject CreateFullScreenPanel(Transform canvas, string name, Color color, bool raycastTarget)
     {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(1f, 1f);
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.anchoredPosition = new Vector2(0f, topOffset);
-        rect.sizeDelta = new Vector2(-40f, height);
+        var panelObject = new GameObject(name, typeof(RectTransform));
+        panelObject.transform.SetParent(canvas, false);
+
+        var rect = panelObject.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        var image = panelObject.AddComponent<Image>();
+        image.color = color;
+        // 全屏面板本身不接收射线，否则会挡住 AR 场景的点击
+        image.raycastTarget = raycastTarget;
+
+        return panelObject;
+    }
+
+    private static Button CreateFixedButton(
+        Transform parent,
+        string label,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 anchoredPosition,
+        Vector2 size,
+        Color color)
+    {
+        var buttonObject = new GameObject(label, typeof(RectTransform));
+        buttonObject.transform.SetParent(parent, false);
+
+        var rect = buttonObject.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = anchorMin;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = size;
+
+        var image = buttonObject.AddComponent<Image>();
+        image.color = color;
+
+        var button = buttonObject.AddComponent<Button>();
+        CreateText(buttonObject.transform, label, 34);
+
+        return button;
+    }
+
+    private static Button CreateRowButton(Transform parent, string label, float index, float count)
+    {
+        var buttonObject = new GameObject(label, typeof(RectTransform));
+        buttonObject.transform.SetParent(parent, false);
+
+        var rect = buttonObject.GetComponent<RectTransform>();
+        float width = 1f / count;
+        rect.anchorMin = new Vector2(index * width, 0f);
+        rect.anchorMax = new Vector2((index + 1f) * width, 1f);
+        rect.offsetMin = new Vector2(6f, 0f);
+        rect.offsetMax = new Vector2(-6f, 0f);
+
+        var image = buttonObject.AddComponent<Image>();
+        image.color = new Color(0.22f, 0.25f, 0.31f, 1f);
+
+        var button = buttonObject.AddComponent<Button>();
+        CreateText(buttonObject.transform, label, 30);
+
+        return button;
     }
 
     private static InputField CreateInputField(Transform parent, string placeholder, float topOffset, float height)
@@ -434,243 +945,64 @@ public static class SceneBuilder
         return input;
     }
 
-    private static Button CreateRowButton(Transform parent, string label, float index, float count)
-    {
-        var buttonObject = new GameObject(label, typeof(RectTransform));
-        buttonObject.transform.SetParent(parent, false);
-
-        var rect = buttonObject.GetComponent<RectTransform>();
-        float width = 1f / count;
-        rect.anchorMin = new Vector2(index * width, 0f);
-        rect.anchorMax = new Vector2((index + 1f) * width, 1f);
-        rect.offsetMin = new Vector2(6f, 0f);
-        rect.offsetMax = new Vector2(-6f, 0f);
-
-        var image = buttonObject.AddComponent<Image>();
-        image.color = new Color(0.22f, 0.25f, 0.31f, 1f);
-
-        var button = buttonObject.AddComponent<Button>();
-        CreateText(buttonObject.transform, label, 30);
-
-        return button;
-    }
-
-    /// <summary>
-    /// 启动引导页：三步说明 + START 按钮，点过之后才进入 AR 取景。
-    /// </summary>
-    private static void CreateGuide(Transform canvas)
-    {
-        var panelObject = new GameObject("Guide", typeof(RectTransform));
-        panelObject.transform.SetParent(canvas, false);
-
-        var panelRect = panelObject.GetComponent<RectTransform>();
-        panelRect.anchorMin = Vector2.zero;
-        panelRect.anchorMax = Vector2.one;
-        panelRect.offsetMin = Vector2.zero;
-        panelRect.offsetMax = Vector2.zero;
-
-        var panelImage = panelObject.AddComponent<Image>();
-        panelImage.color = new Color(0.04f, 0.06f, 0.09f, 0.98f);
-
-        var titleObject = new GameObject("Title", typeof(RectTransform));
-        titleObject.transform.SetParent(panelObject.transform, false);
-        var titleRect = titleObject.GetComponent<RectTransform>();
-        titleRect.anchorMin = new Vector2(0f, 1f);
-        titleRect.anchorMax = new Vector2(1f, 1f);
-        titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.anchoredPosition = new Vector2(0f, -240f);
-        titleRect.sizeDelta = new Vector2(-80f, 120f);
-
-        var titleText = titleObject.AddComponent<Text>();
-        titleText.font = BuiltinFont();
-        titleText.fontSize = 56;
-        titleText.fontStyle = FontStyle.Bold;
-        titleText.alignment = TextAnchor.MiddleCenter;
-        titleText.color = Color.white;
-        titleText.text = "Park Inspection AR";
-
-        var stepsObject = new GameObject("Steps", typeof(RectTransform));
-        stepsObject.transform.SetParent(panelObject.transform, false);
-        var stepsRect = stepsObject.GetComponent<RectTransform>();
-        stepsRect.anchorMin = new Vector2(0f, 1f);
-        stepsRect.anchorMax = new Vector2(1f, 1f);
-        stepsRect.pivot = new Vector2(0.5f, 1f);
-        stepsRect.anchoredPosition = new Vector2(0f, -400f);
-        stepsRect.sizeDelta = new Vector2(-140f, 460f);
-
-        var stepsText = stepsObject.AddComponent<Text>();
-        stepsText.font = BuiltinFont();
-        stepsText.fontSize = 34;
-        stepsText.alignment = TextAnchor.UpperLeft;
-        stepsText.color = new Color(0.78f, 0.84f, 0.92f);
-        stepsText.lineSpacing = 1.6f;
-        stepsText.text = "1.  Point your phone at a desk or floor\n    and move it slowly to scan\n\n2.  Tap the surface to drop a marker\n\n3.  Fill in the form and submit";
-
-        var startObject = new GameObject("Start", typeof(RectTransform));
-        startObject.transform.SetParent(panelObject.transform, false);
-        var startRect = startObject.GetComponent<RectTransform>();
-        startRect.anchorMin = new Vector2(0.5f, 0f);
-        startRect.anchorMax = new Vector2(0.5f, 0f);
-        startRect.pivot = new Vector2(0.5f, 0f);
-        startRect.anchoredPosition = new Vector2(0f, 190f);
-        startRect.sizeDelta = new Vector2(440f, 120f);
-
-        var startImage = startObject.AddComponent<Image>();
-        startImage.color = new Color(0.14f, 0.39f, 0.92f, 1f);
-
-        var startButton = startObject.AddComponent<Button>();
-
-        var startLabelObject = new GameObject("Text", typeof(RectTransform));
-        startLabelObject.transform.SetParent(startObject.transform, false);
-        var startLabelRect = startLabelObject.GetComponent<RectTransform>();
-        startLabelRect.anchorMin = Vector2.zero;
-        startLabelRect.anchorMax = Vector2.one;
-        startLabelRect.offsetMin = Vector2.zero;
-        startLabelRect.offsetMax = Vector2.zero;
-
-        var startLabel = startLabelObject.AddComponent<Text>();
-        startLabel.font = BuiltinFont();
-        startLabel.fontSize = 40;
-        startLabel.fontStyle = FontStyle.Bold;
-        startLabel.alignment = TextAnchor.MiddleCenter;
-        startLabel.color = Color.white;
-        startLabel.text = "START";
-
-        var guide = panelObject.AddComponent<ARGuide>();
-        guide.guidePanel = panelObject;
-        guide.startButton = startButton;
-    }
-
     private static Text CreateText(Transform parent, string content, int fontSize)
+    {
+        return CreateText(parent, content, fontSize, true);
+    }
+
+    private static Text CreateText(Transform parent, string content, int fontSize, bool stretch)
     {
         var textObject = new GameObject("Text", typeof(RectTransform));
         textObject.transform.SetParent(parent, false);
 
         var rect = textObject.GetComponent<RectTransform>();
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = new Vector2(12f, 0f);
-        rect.offsetMax = new Vector2(-12f, 0f);
+
+        if (stretch)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = new Vector2(12f, 0f);
+            rect.offsetMax = new Vector2(-12f, 0f);
+        }
 
         var text = textObject.AddComponent<Text>();
-        text.font = BuiltinFont();
+        text.font = ChineseFont();
         text.fontSize = fontSize;
         text.alignment = TextAnchor.MiddleCenter;
         text.color = Color.white;
         text.text = content;
+        // 文字不参与点击，按钮靠背景 Image 接收
+        text.raycastTarget = false;
 
         return text;
     }
 
-    private static Font BuiltinFont()
+    private static void SetTopStretch(RectTransform rect, float topOffset, float height)
     {
-        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = new Vector2(0f, topOffset);
+        rect.sizeDelta = new Vector2(-40f, height);
+    }
+
+    /// <summary>
+    /// 构建时用的占位字体。真正的中文字形由 ChineseFontApplier 在运行时替换。
+    /// </summary>
+    private static Font ChineseFont()
+    {
+        Font font = Font.CreateDynamicFontFromOSFont(
+            new[] { "Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial" }, 32);
+
         if (font != null)
         {
             return font;
         }
 
-        return Resources.GetBuiltinResource<Font>("Arial.ttf");
+        return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
     }
 
-    [MenuItem("ARWork/2. 构建 APK")]
-    public static void BuildApk()
-    {
-        EnsurePreloadedXR();
-        Directory.CreateDirectory("Builds");
-        var options = new BuildPlayerOptions
-        {
-            scenes = new[] { ScenePath },
-            locationPathName = ApkPath,
-            target = BuildTarget.Android,
-            options = BuildOptions.None
-        };
-
-        BuildReport report = BuildPipeline.BuildPlayer(options);
-        BuildSummary summary = report.summary;
-        Debug.Log("BUILD_RESULT: " + summary.result + " size=" + summary.totalSize);
-
-        if (summary.result != BuildResult.Succeeded)
-        {
-            EditorApplication.Exit(1);
-        }
-    }
-
-    [MenuItem("ARWork/3. 导出 ARCore 插件状态")]
-    public static void DumpPlugins()
-    {
-        string[] paths =
-        {
-            "Packages/com.unity.xr.arcore/Runtime/Android/UnityARCore.aar",
-            "Packages/com.unity.xr.arcore/Runtime/Android/arcore_client.aar",
-            "Packages/com.unity.xr.arcore/Runtime/Android/ARPresto.aar",
-            "Packages/com.unity.xr.arcore/Runtime/Android/unityandroidpermissions.aar"
-        };
-
-        foreach (string path in paths)
-        {
-            var importer = AssetImporter.GetAtPath(path) as PluginImporter;
-            if (importer == null)
-            {
-                Debug.Log("PLUGIN_MISSING: " + path);
-                continue;
-            }
-
-            Debug.Log(string.Format("PLUGIN: {0} android={1} cpu={2} anyPlatform={3}",
-                path,
-                importer.GetCompatibleWithPlatform(BuildTarget.Android),
-                importer.GetPlatformData(BuildTarget.Android, "CPU"),
-                importer.GetCompatibleWithAnyPlatform()));
-        }
-    }
-
-    /// <summary>
-    /// 项目内的 ARCore aar 默认没有 CPU 标记，导致里面的 .so 不被提取进包，
-    /// 这里显式标为 ARM64 后再重新导入。
-    /// </summary>
-    private static void ConfigureNativePlugins()
-    {
-        AssetDatabase.Refresh();
-
-        string[] aarNames = { "UnityARCore.aar", "arcore_client.aar", "ARPresto.aar" };
-        foreach (string name in aarNames)
-        {
-            string path = "Assets/Plugins/Android/" + name;
-            var importer = AssetImporter.GetAtPath(path) as PluginImporter;
-            if (importer == null)
-            {
-                Debug.LogWarning("NATIVE_PLUGIN_MISSING: " + path);
-                continue;
-            }
-
-            importer.SetPlatformData(BuildTarget.Android, "CPU", "ARM64");
-            importer.SaveAndReimport();
-            Debug.Log("NATIVE_PLUGIN_ARM64: " + path);
-        }
-
-        // aar 里的 .so 不被 Unity 提取，这里用拆出来的裸 .so 直接提供
-        string[] soNames =
-        {
-            "libUnityARCore.so", "libarcore_sdk_c.so",
-            "libarcore_sdk_jni.so", "libarpresto_api.so"
-        };
-        foreach (string name in soNames)
-        {
-            string path = "Assets/Plugins/Android/arm64-v8a/" + name;
-            var importer = AssetImporter.GetAtPath(path) as PluginImporter;
-            if (importer == null)
-            {
-                Debug.LogWarning("NATIVE_SO_MISSING: " + path);
-                continue;
-            }
-
-            importer.SetCompatibleWithAnyPlatform(false);
-            importer.SetCompatibleWithPlatform(BuildTarget.Android, true);
-            importer.SetPlatformData(BuildTarget.Android, "CPU", "ARM64");
-            importer.SaveAndReimport();
-            Debug.Log("NATIVE_SO_ARM64: " + path);
-        }
-    }
+    // ---------------------------------------------------------------- 配置与诊断
 
     /// <summary>
     /// XR 配置挂在 EditorBuildSettings 上，构建时会被当成无引用资源丢掉，
@@ -703,7 +1035,7 @@ public static class SceneBuilder
         Debug.Log("PRELOADED_XR: " + AssetDatabase.GetAssetPath(settings) + " count=" + preloaded.Count);
     }
 
-    [MenuItem("ARWork/4. 诊断 XR 配置")]
+    [MenuItem("ARWork/3. 诊断 XR 配置")]
     public static void DiagnoseXR()
     {
         bool found = EditorBuildSettings.TryGetConfigObject(XRGeneralSettings.k_SettingsKey, out XRGeneralSettingsPerBuildTarget perTarget);
@@ -713,9 +1045,6 @@ public static class SceneBuilder
         {
             XRGeneralSettings s = perTarget.SettingsForBuildTarget(BuildTargetGroup.Android);
             Debug.Log("DIAG_SETTINGS_ANDROID: " + (s == null ? "NULL" : AssetDatabase.GetAssetPath(s)));
-
-            XRGeneralSettings s2 = perTarget.SettingsForBuildTarget(BuildTargetGroup.Standalone);
-            Debug.Log("DIAG_SETTINGS_STANDALONE: " + (s2 == null ? "NULL" : AssetDatabase.GetAssetPath(s2)));
         }
 
         Debug.Log("DIAG_ACTIVE_TARGET: " + EditorUserBuildSettings.activeBuildTarget);
@@ -742,91 +1071,5 @@ public static class SceneBuilder
         PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.OpenGLES3 });
 
         Debug.Log("PLAYER_CONFIGURED");
-    }
-
-    /// <summary>
-    /// 在 XR Plug-in Management 的 Android 页签下勾选 ARCore。
-    /// 批处理模式下属性 setter 不可靠（引用会落成 fileID: 0），
-    /// 因此全部改为重建 asset + SerializedObject 直写字段。
-    /// </summary>
-    private static void EnableARCoreLoader()
-    {
-        const BuildTargetGroup group = BuildTargetGroup.Android;
-
-        if (AssetDatabase.IsValidFolder("Assets/XR"))
-        {
-            AssetDatabase.DeleteAsset("Assets/XR");
-        }
-
-        Directory.CreateDirectory("Assets/XR/Loaders");
-
-        var loader = ScriptableObject.CreateInstance<ARCoreLoader>();
-        loader.name = "ARCoreLoader";
-        AssetDatabase.CreateAsset(loader, "Assets/XR/Loaders/ARCoreLoader.asset");
-
-        var manager = ScriptableObject.CreateInstance<XRManagerSettings>();
-        manager.name = "Android XR Manager";
-        AssetDatabase.CreateAsset(manager, "Assets/XR/Android XR Manager.asset");
-
-        var settings = ScriptableObject.CreateInstance<XRGeneralSettings>();
-        settings.name = "Android Settings";
-        AssetDatabase.CreateAsset(settings, "Assets/XR/Android Settings.asset");
-
-        var perTarget = ScriptableObject.CreateInstance<XRGeneralSettingsPerBuildTarget>();
-        perTarget.name = "XRGeneralSettingsPerBuildTarget";
-        AssetDatabase.CreateAsset(perTarget, "Assets/XR/XRGeneralSettingsPerBuildTarget.asset");
-
-        AssetDatabase.SaveAssets();
-
-        var managerSo = new SerializedObject(manager);
-        SerializedProperty loadersProp = managerSo.FindProperty("m_Loaders");
-        loadersProp.arraySize = 1;
-        loadersProp.GetArrayElementAtIndex(0).objectReferenceValue = loader;
-        managerSo.ApplyModifiedPropertiesWithoutUndo();
-
-        var settingsSo = new SerializedObject(settings);
-        settingsSo.FindProperty("m_LoaderManagerInstance").objectReferenceValue = manager;
-        settingsSo.ApplyModifiedPropertiesWithoutUndo();
-
-        perTarget.SetSettingsForBuildTarget(group, settings);
-        EditorUtility.SetDirty(perTarget);
-        EditorBuildSettings.AddConfigObject(XRGeneralSettings.k_SettingsKey, perTarget, true);
-
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-
-        Debug.Log("XR_MANAGER_PATH: " + AssetDatabase.GetAssetPath(settings.Manager));
-        Debug.Log("XR_LOADER_COUNT: " + manager.activeLoaders.Count);
-    }
-
-    private static void CreateScene()
-    {
-        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
-        var sessionObject = new GameObject("AR Session");
-        sessionObject.AddComponent<ARSession>();
-
-        var originObject = new GameObject("XR Origin");
-
-        var cameraObject = new GameObject("AR Camera");
-        cameraObject.transform.SetParent(originObject.transform, false);
-        cameraObject.tag = "MainCamera";
-
-        Camera camera = cameraObject.AddComponent<Camera>();
-        camera.clearFlags = CameraClearFlags.SolidColor;
-        camera.backgroundColor = Color.black;
-        camera.nearClipPlane = 0.1f;
-        camera.farClipPlane = 1000f;
-
-        cameraObject.AddComponent<ARCameraManager>();
-        cameraObject.AddComponent<ARCameraBackground>();
-        cameraObject.AddComponent<AudioListener>();
-
-        var selfTestObject = new GameObject("Self Test");
-        selfTestObject.AddComponent<ARSelfTest>();
-
-        Directory.CreateDirectory("Assets/Scenes");
-        EditorSceneManager.SaveScene(scene, ScenePath);
-        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
     }
 }
