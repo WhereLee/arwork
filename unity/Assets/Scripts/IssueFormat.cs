@@ -6,10 +6,10 @@ using UnityEngine;
 /// </summary>
 public static class IssueFormat
 {
-    private static readonly Color PendingColor = new Color(0.95f, 0.62f, 0.18f);
-    private static readonly Color DoingColor = new Color(0.28f, 0.58f, 0.95f);
-    private static readonly Color ReviewColor = new Color(0.75f, 0.55f, 0.95f);
-    private static readonly Color DoneColor = new Color(0.3f, 0.78f, 0.45f);
+    private static readonly Color PendingColor = UiPalette.StatePending;
+    private static readonly Color DoingColor = UiPalette.StateDoing;
+    private static readonly Color ReviewColor = UiPalette.StateReview;
+    private static readonly Color DoneColor = UiPalette.StateDone;
 
     public static string StatusLabel(string status)
     {

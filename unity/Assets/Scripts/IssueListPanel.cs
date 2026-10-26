@@ -30,8 +30,8 @@ public class IssueListPanel : MonoBehaviour
     /// <summary>点了某一条，由流程控制打开详情。</summary>
     public event Action<IssueSummary> RowClicked;
 
-    private static readonly Color HintColor = new Color(0.75f, 0.8f, 0.88f);
-    private static readonly Color ErrorColor = new Color(1f, 0.55f, 0.5f);
+    private static readonly Color HintColor = UiPalette.Hint;
+    private static readonly Color ErrorColor = UiPalette.Error;
 
     private readonly List<GameObject> _rows = new List<GameObject>();
     private Coroutine _loading;
@@ -171,19 +171,29 @@ public class IssueListPanel : MonoBehaviour
             }
         }
 
-        // 每一行捕获自己的数据，点哪条开哪条
+        // 每一行捕获自己的数据，点哪条开哪条。
+        // Button 不依赖模板上是否序列化成功，这里拿不到就现加一个。
         var button = row.GetComponent<Button>();
-        if (button != null)
+        if (button == null)
         {
-            IssueSummary captured = issue;
-            button.onClick.AddListener(delegate
-            {
-                if (RowClicked != null)
-                {
-                    RowClicked(captured);
-                }
-            });
+            button = row.AddComponent<Button>();
+            button.targetGraphic = row.GetComponent<Image>();
         }
+
+        IssueSummary captured = issue;
+        button.onClick.AddListener(delegate
+        {
+            Debug.Log("[AR] 点击工单：" + captured.title);
+
+            if (RowClicked != null)
+            {
+                RowClicked(captured);
+            }
+            else
+            {
+                Debug.LogWarning("[AR] RowClicked 没有订阅者");
+            }
+        });
     }
 
     private void ClearRows()

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -31,12 +35,33 @@ func main() {
 	}
 
 	api := &API{store: store, ai: LoadAIConfig()}
+	server := &http.Server{Addr: addr, Handler: api.Routes()}
 
 	log.Printf("巡检问题服务已启动 http://localhost%s （数据库 %s，AI 分诊 %s）",
 		addr, dbPath, enabledLabel(api.ai.Enabled()))
-	if err := http.ListenAndServe(addr, api.Routes()); err != nil {
+
+	// Ctrl+C 或 SIGTERM 时先停止接新请求，给手上的请求 10 秒收尾，
+	// 避免部署重启时正在上报的工单被拔断。
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-stop
+		log.Println("正在关闭服务，等待请求处理完…")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("关闭超时，强制退出: %v", err)
+		}
+	}()
+
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("服务异常退出: %v", err)
 	}
+
+	log.Println("服务已停止")
 }
 
 func envOr(key, fallback string) string {

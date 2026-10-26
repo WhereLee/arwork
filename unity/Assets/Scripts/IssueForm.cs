@@ -36,10 +36,10 @@ public class IssueForm : MonoBehaviour
     /// <summary>取消后触发。</summary>
     public event System.Action Cancelled;
 
-    private static readonly Color SelectedColor = new Color(0.14f, 0.39f, 0.92f, 1f);
-    private static readonly Color NormalColor = new Color(0.22f, 0.25f, 0.31f, 1f);
-    private static readonly Color SuccessColor = new Color(0.55f, 0.95f, 0.62f);
-    private static readonly Color FailureColor = new Color(1f, 0.55f, 0.5f);
+    private static readonly Color SelectedColor = UiPalette.BtnSelected;
+    private static readonly Color NormalColor = UiPalette.BtnIdle;
+    private static readonly Color SuccessColor = UiPalette.Success;
+    private static readonly Color FailureColor = UiPalette.Error;
 
     private string _priority = "medium";
     private Vector3 _position;

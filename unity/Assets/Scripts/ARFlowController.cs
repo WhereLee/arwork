@@ -57,8 +57,8 @@ public class ARFlowController : MonoBehaviour
     /// <summary>其余平面保持很淡。</summary>
     private static readonly Color IdleColor = new Color(1f, 1f, 1f, 0.08f);
 
-    private static readonly Color SwitchActiveColor = new Color(0.14f, 0.39f, 0.92f, 1f);
-    private static readonly Color SwitchIdleColor = new Color(0.25f, 0.28f, 0.34f, 0.95f);
+    private static readonly Color SwitchActiveColor = UiPalette.BtnSelected;
+    private static readonly Color SwitchIdleColor = UiPalette.BtnIdle;
 
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
@@ -440,6 +440,8 @@ public class ARFlowController : MonoBehaviour
     {
         if (_mode != Mode.List || detailPanel == null)
         {
+            Debug.LogWarning(string.Format(
+                "[AR] 忽略列表点击：mode={0} detailPanel={1}", _mode, detailPanel != null));
             return;
         }
 

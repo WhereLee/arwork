@@ -90,7 +90,7 @@ public class ReasonDialog : MonoBehaviour
             if (hintText != null)
             {
                 hintText.text = "这一项必须填";
-                hintText.color = new Color(1f, 0.55f, 0.5f);
+                hintText.color = UiPalette.Error;
             }
 
             return;

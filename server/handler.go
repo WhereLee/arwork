@@ -41,7 +41,7 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("PATCH /users/{username}",
 		a.requireRole([]string{RoleAdmin}, a.handleUpdateUser))
 
-	return withCORS(mux)
+	return withRequestLog(withCORS(mux))
 }
 
 // createRequest 只包含客户端能决定的字段，id、status 与时间由服务端生成。
@@ -90,7 +90,15 @@ type loginResponse struct {
 	Specialties []string `json:"specialties"`
 }
 
+// handleHealth 除了报进程活着，还要确认数据库能连上。
+// 只看进程会漏掉磁盘满、库文件损坏这类“进程在但用不了”的情况。
 func (a *API) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	if err := a.store.Ping(); err != nil {
+		log.Printf("健康检查失败: %v", err)
+		writeError(w, http.StatusServiceUnavailable, "数据库不可用")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -383,6 +391,31 @@ func writeConflict(w http.ResponseWriter, issue Issue) {
 		"error":  "这条工单刚被改动，请刷新后重试",
 		"status": issue.Status,
 	})
+}
+
+// withRequestLog 给每个请求记一行：路径、状态码、耗时。
+// 排查“哪个请求慢了”时不用再靠猜。
+func withRequestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(recorder, r)
+
+		log.Printf("[http] %s %s %d %dms",
+			r.Method, r.URL.Path, recorder.status, time.Since(start).Milliseconds())
+	})
+}
+
+// statusRecorder 把 handler 写的状态码记下来，供日志用。
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 // withCORS 放行浏览器跨域，React 管理端才能直接访问后端。

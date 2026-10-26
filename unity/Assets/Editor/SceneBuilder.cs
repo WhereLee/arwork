@@ -657,7 +657,7 @@ public static class SceneBuilder
 
     private static GameObject CreateGuidePanel(Transform canvas, UIRefs refs)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "Guide", new Color(0.04f, 0.06f, 0.09f, 0.98f), false);
+        GameObject panel = CreateFullScreenPanel(canvas, "Guide", UiPalette.BgDeep, false);
 
         // 顶部一行：左边当前账号，右边「我的上报」
         refs.accountText = CreateText(panel.transform, string.Empty, 30, false);
@@ -668,12 +668,12 @@ public static class SceneBuilder
         accountRect.anchoredPosition = new Vector2(44f, -40f);
         accountRect.sizeDelta = new Vector2(620f, 60f);
         refs.accountText.alignment = TextAnchor.MiddleLeft;
-        refs.accountText.color = new Color(0.68f, 0.74f, 0.82f);
+        refs.accountText.color = UiPalette.TextMuted;
 
         refs.openListButton = CreateFixedButton(
             panel.transform, "我的上报",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
-            new Vector2(240f, 84f), new Color(0.22f, 0.25f, 0.31f, 0.95f));
+            new Vector2(240f, 84f), UiPalette.BtnIdle);
 
         Text title = CreateText(panel.transform, "园区巡检 AR", 56, false);
         SetTopStretch(title.rectTransform, -240f, 120f);
@@ -688,18 +688,18 @@ public static class SceneBuilder
         stepsRect.sizeDelta = new Vector2(-160f, 420f);
         steps.alignment = TextAnchor.UpperLeft;
         steps.lineSpacing = 1.6f;
-        steps.color = new Color(0.78f, 0.84f, 0.92f);
+        steps.color = UiPalette.TextBody;
         steps.text = "1. 选择要标记的表面\n2. 缓慢移动手机扫描\n3. 点击表面，放置标记并上报";
 
         refs.horizontalButton = CreateFixedButton(
             panel.transform, "水平面 · 桌面或地面",
             new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 300f),
-            new Vector2(700f, 130f), new Color(0.14f, 0.39f, 0.92f, 1f));
+            new Vector2(700f, 130f), UiPalette.BtnPrimary, true);
 
         refs.verticalButton = CreateFixedButton(
             panel.transform, "垂直面 · 墙面",
             new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 140f),
-            new Vector2(700f, 130f), new Color(0.2f, 0.55f, 0.45f, 1f));
+            new Vector2(700f, 130f), UiPalette.BtnIdle);
 
         return panel;
     }
@@ -729,17 +729,17 @@ public static class SceneBuilder
         refs.hudHorizontalButton = CreateFixedButton(
             panel.transform, "水平",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-420f, -30f),
-            new Vector2(170f, 90f), new Color(0.25f, 0.28f, 0.34f, 0.95f));
+            new Vector2(170f, 90f), UiPalette.BtnIdle);
 
         refs.hudVerticalButton = CreateFixedButton(
             panel.transform, "垂直",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-230f, -30f),
-            new Vector2(170f, 90f), new Color(0.25f, 0.28f, 0.34f, 0.95f));
+            new Vector2(170f, 90f), UiPalette.BtnIdle);
 
         refs.exitButton = CreateFixedButton(
             panel.transform, "退出",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -30f),
-            new Vector2(170f, 90f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
+            new Vector2(170f, 90f), UiPalette.BtnIdle);
 
         // 临时提示，默认隐藏
         refs.toastText = CreateText(panel.transform, string.Empty, 32, false);
@@ -749,7 +749,7 @@ public static class SceneBuilder
         toastRect.pivot = new Vector2(0.5f, 0.5f);
         toastRect.anchoredPosition = new Vector2(0f, -170f);
         toastRect.sizeDelta = new Vector2(860f, 110f);
-        refs.toastText.color = new Color(1f, 0.9f, 0.6f);
+        refs.toastText.color = UiPalette.StatePending;
         refs.toastText.gameObject.SetActive(false);
 
         return panel;
@@ -760,7 +760,7 @@ public static class SceneBuilder
     /// </summary>
     private static GameObject CreateConfirmPanel(Transform canvas, UIRefs refs)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "Confirm", new Color(0f, 0f, 0f, 0.6f), true);
+        GameObject panel = CreateFullScreenPanel(canvas, "Confirm", UiPalette.Overlay, true);
 
         var boxObject = new GameObject("Box", typeof(RectTransform));
         boxObject.transform.SetParent(panel.transform, false);
@@ -772,7 +772,7 @@ public static class SceneBuilder
         boxRect.sizeDelta = new Vector2(820f, 440f);
 
         var boxImage = boxObject.AddComponent<Image>();
-        ApplyRoundedBackground(boxImage, new Color(0.1f, 0.12f, 0.16f, 1f));
+        ApplyRoundedBackground(boxImage, UiPalette.BgCard);
 
         Text message = CreateText(boxObject.transform, "退出会清空本轮所有标记\n确定要退出吗？", 34, false);
         SetTopStretch(message.rectTransform, -70f, 190f);
@@ -791,7 +791,7 @@ public static class SceneBuilder
 
         refs.confirmNoButton = CreateRowButton(buttonRow.transform, "留下", 0f, 2f);
         refs.confirmYesButton = CreateRowButton(buttonRow.transform, "退出", 1f, 2f);
-        refs.confirmYesButton.image.color = new Color(0.68f, 0.26f, 0.26f, 1f);
+        refs.confirmYesButton.image.color = UiPalette.BtnDanger;
 
         return panel;
     }
@@ -802,7 +802,7 @@ public static class SceneBuilder
     /// </summary>
     private static LoginForm CreateLoginPanel(Transform canvas)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "Login", new Color(0.04f, 0.06f, 0.09f, 1f), true);
+        GameObject panel = CreateFullScreenPanel(canvas, "Login", UiPalette.BgDeep, true);
 
         var card = new GameObject("Card", typeof(RectTransform));
         card.transform.SetParent(panel.transform, false);
@@ -814,7 +814,7 @@ public static class SceneBuilder
         cardRect.sizeDelta = new Vector2(840f, 830f);
 
         var cardImage = card.AddComponent<Image>();
-        ApplyRoundedBackground(cardImage, new Color(0.09f, 0.11f, 0.15f, 1f));
+        ApplyRoundedBackground(cardImage, UiPalette.BgCard);
 
         Text title = CreateText(card.transform, "园区巡检 AR", 54, false);
         SetTopStretch(title.rectTransform, -56f, 76f);
@@ -822,7 +822,7 @@ public static class SceneBuilder
 
         Text subtitle = CreateText(card.transform, "登录后开始上报问题", 30, false);
         SetTopStretch(subtitle.rectTransform, -136f, 50f);
-        subtitle.color = new Color(0.68f, 0.74f, 0.82f);
+        subtitle.color = UiPalette.TextMuted;
 
         InputField usernameInput = CreateInputField(card.transform, "账号", -220f, 92f);
 
@@ -830,11 +830,11 @@ public static class SceneBuilder
         passwordInput.contentType = InputField.ContentType.Password;
 
         Button loginButton = CreateWideButton(card.transform, "登录", -450f, 100f,
-            new Color(0.14f, 0.39f, 0.92f, 1f));
+            UiPalette.BtnPrimary, true);
 
         Text statusText = CreateText(card.transform, string.Empty, 28, false);
         SetTopStretch(statusText.rectTransform, -572f, 56f);
-        statusText.color = new Color(1f, 0.55f, 0.5f);
+        statusText.color = UiPalette.Error;
 
         InputField serverInput = CreateInputField(card.transform, "服务器地址", -648f, 80f);
         serverInput.text = ApiClient.DefaultBaseUrl;
@@ -851,7 +851,8 @@ public static class SceneBuilder
     }
 
     /// <summary>撑满父级宽度、按上边距定位的按钮。</summary>
-    private static Button CreateWideButton(Transform parent, string label, float topOffset, float height, Color color)
+    private static Button CreateWideButton(
+        Transform parent, string label, float topOffset, float height, Color color, bool darkText = false)
     {
         var buttonObject = new GameObject(label, typeof(RectTransform));
         buttonObject.transform.SetParent(parent, false);
@@ -862,7 +863,8 @@ public static class SceneBuilder
         ApplyRoundedBackground(image, color);
 
         var button = buttonObject.AddComponent<Button>();
-        CreateText(buttonObject.transform, label, 36);
+        Text buttonText = CreateText(buttonObject.transform, label, 36);
+        buttonText.color = darkText ? UiPalette.TextOnLight : UiPalette.TextPrimary;
 
         return button;
     }
@@ -873,7 +875,7 @@ public static class SceneBuilder
     /// </summary>
     private static IssueListPanel CreateIssueListPanel(Transform canvas)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "IssueList", new Color(0.04f, 0.06f, 0.09f, 0.99f), true);
+        GameObject panel = CreateFullScreenPanel(canvas, "IssueList", UiPalette.BgDeep, true);
 
         Text header = CreateText(panel.transform, "我的上报", 44, false);
         var headerRect = header.rectTransform;
@@ -888,7 +890,7 @@ public static class SceneBuilder
         Button closeButton = CreateFixedButton(
             panel.transform, "关闭",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
-            new Vector2(170f, 84f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
+            new Vector2(170f, 84f), UiPalette.BtnIdle);
 
         var scrollObject = new GameObject("Scroll", typeof(RectTransform));
         scrollObject.transform.SetParent(panel.transform, false);
@@ -936,7 +938,7 @@ public static class SceneBuilder
         Button refreshButton = CreateFixedButton(
             panel.transform, "刷新",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 36f),
-            new Vector2(170f, 84f), new Color(0.22f, 0.25f, 0.31f, 1f));
+            new Vector2(170f, 84f), UiPalette.BtnIdle);
 
         Text statusText = CreateText(panel.transform, string.Empty, 28, false);
         var statusRect = statusText.rectTransform;
@@ -970,7 +972,7 @@ public static class SceneBuilder
         rowRect.sizeDelta = new Vector2(0f, 140f);
 
         var rowImage = row.AddComponent<Image>();
-        ApplyRoundedBackground(rowImage, new Color(0.12f, 0.15f, 0.2f, 1f));
+        ApplyRoundedBackground(rowImage, UiPalette.BgPanel);
 
         // 整行可点，点开详情
         row.AddComponent<Button>().targetGraphic = rowImage;
@@ -986,7 +988,7 @@ public static class SceneBuilder
         badgeRect.sizeDelta = new Vector2(10f, 76f);
 
         var badgeImage = badge.AddComponent<Image>();
-        ApplyRoundedBackground(badgeImage, new Color(0.6f, 0.65f, 0.72f));
+        ApplyRoundedBackground(badgeImage, UiPalette.TextMuted);
 
         Text title = CreateText(row.transform, string.Empty, 34, false);
         title.name = "Title";
@@ -1007,7 +1009,7 @@ public static class SceneBuilder
         metaRect.offsetMin = new Vector2(72f, 20f);
         metaRect.offsetMax = new Vector2(-32f, 62f);
         meta.alignment = TextAnchor.MiddleLeft;
-        meta.color = new Color(0.68f, 0.74f, 0.82f);
+        meta.color = UiPalette.TextMuted;
 
         row.SetActive(false);
         return row;
@@ -1019,7 +1021,7 @@ public static class SceneBuilder
     /// </summary>
     private static IssueDetailPanel CreateIssueDetailPanel(Transform canvas)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "IssueDetail", new Color(0.04f, 0.06f, 0.09f, 0.99f), true);
+        GameObject panel = CreateFullScreenPanel(canvas, "IssueDetail", UiPalette.BgDeep, true);
 
         Text title = CreateText(panel.transform, string.Empty, 40, false);
         var titleRect = title.rectTransform;
@@ -1034,7 +1036,7 @@ public static class SceneBuilder
         Button closeButton = CreateFixedButton(
             panel.transform, "关闭",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
-            new Vector2(170f, 84f), new Color(0.33f, 0.36f, 0.43f, 0.95f));
+            new Vector2(170f, 84f), UiPalette.BtnIdle);
 
         var scrollObject = new GameObject("Scroll", typeof(RectTransform));
         scrollObject.transform.SetParent(panel.transform, false);
@@ -1080,7 +1082,7 @@ public static class SceneBuilder
         status.fontStyle = FontStyle.Bold;
 
         Text meta = CreateBodyText(contentObject.transform, string.Empty, 28);
-        meta.color = new Color(0.68f, 0.74f, 0.82f);
+        meta.color = UiPalette.TextMuted;
 
         Text description = CreateBodyText(contentObject.transform, string.Empty, 30);
 
@@ -1097,34 +1099,34 @@ public static class SceneBuilder
         repairLayout.childAlignment = TextAnchor.UpperLeft;
 
         repairSection.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        ApplyRoundedBackground(repairSection.AddComponent<Image>(), new Color(0.12f, 0.15f, 0.2f, 1f));
+        ApplyRoundedBackground(repairSection.AddComponent<Image>(), UiPalette.BgPanel);
 
         Text repairLabel = CreateBodyText(repairSection.transform, "处理记录", 26);
-        repairLabel.color = new Color(0.68f, 0.74f, 0.82f);
+        repairLabel.color = UiPalette.TextMuted;
 
         Text repairText = CreateBodyText(repairSection.transform, string.Empty, 30);
 
         Text timelineLabel = CreateBodyText(contentObject.transform, "流转记录", 26);
-        timelineLabel.color = new Color(0.68f, 0.74f, 0.82f);
+        timelineLabel.color = UiPalette.TextMuted;
 
         Text timelineText = CreateBodyText(contentObject.transform, string.Empty, 28);
-        timelineText.color = new Color(0.78f, 0.84f, 0.92f);
+        timelineText.color = UiPalette.TextBody;
 
         Button completeButton = CreateFixedButton(
             panel.transform, "完成",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f),
-            new Vector2(300f, 100f), new Color(0.14f, 0.39f, 0.92f, 1f));
+            new Vector2(300f, 100f), UiPalette.BtnPrimary, true);
 
         Button returnButton = CreateFixedButton(
             panel.transform, "退回",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(360f, 40f),
-            new Vector2(300f, 100f), new Color(0.5f, 0.28f, 0.28f, 1f));
+            new Vector2(300f, 100f), UiPalette.BtnDanger);
 
         // 撤回只会在「待确认」出现，和「完成」互斥，所以放同一个位置
         Button withdrawButton = CreateFixedButton(
             panel.transform, "撤回",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f),
-            new Vector2(300f, 100f), new Color(0.3f, 0.32f, 0.38f, 1f));
+            new Vector2(300f, 100f), UiPalette.BtnIdle);
 
         Text statusMessage = CreateText(panel.transform, string.Empty, 28, false);
         var msgRect = statusMessage.rectTransform;
@@ -1169,7 +1171,7 @@ public static class SceneBuilder
     /// </summary>
     private static ReasonDialog CreateReasonDialog(Transform canvas)
     {
-        GameObject panel = CreateFullScreenPanel(canvas, "ReasonDialog", new Color(0f, 0f, 0f, 0.75f), true);
+        GameObject panel = CreateFullScreenPanel(canvas, "ReasonDialog", UiPalette.Overlay, true);
 
         var card = new GameObject("Card", typeof(RectTransform));
         card.transform.SetParent(panel.transform, false);
@@ -1180,7 +1182,7 @@ public static class SceneBuilder
         cardRect.pivot = new Vector2(0.5f, 0.5f);
         cardRect.sizeDelta = new Vector2(880f, 640f);
 
-        ApplyRoundedBackground(card.AddComponent<Image>(), new Color(0.09f, 0.11f, 0.15f, 1f));
+        ApplyRoundedBackground(card.AddComponent<Image>(), UiPalette.BgCard);
 
         Text title = CreateText(card.transform, string.Empty, 36, false);
         SetTopStretch(title.rectTransform, -48f, 60f);
@@ -1192,17 +1194,17 @@ public static class SceneBuilder
 
         Text hint = CreateText(card.transform, string.Empty, 26, false);
         SetTopStretch(hint.rectTransform, -462f, 50f);
-        hint.color = new Color(1f, 0.55f, 0.5f);
+        hint.color = UiPalette.Error;
 
         Button cancelButton = CreateFixedButton(
             card.transform, "取消",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 36f),
-            new Vector2(380f, 96f), new Color(0.22f, 0.25f, 0.31f, 1f));
+            new Vector2(380f, 96f), UiPalette.BtnIdle);
 
         Button confirmButton = CreateFixedButton(
             card.transform, "确定",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(460f, 36f),
-            new Vector2(380f, 96f), new Color(0.14f, 0.39f, 0.92f, 1f));
+            new Vector2(380f, 96f), UiPalette.BtnPrimary, true);
 
         var dialog = panel.AddComponent<ReasonDialog>();
         dialog.panel = panel;
@@ -1229,7 +1231,7 @@ public static class SceneBuilder
         panelRect.sizeDelta = new Vector2(-40f, 560f);
 
         var panelImage = panelObject.AddComponent<Image>();
-        ApplyRoundedBackground(panelImage, new Color(0.06f, 0.08f, 0.11f, 0.95f));
+        ApplyRoundedBackground(panelImage, UiPalette.BgPanel);
 
         // 第一行左侧给出“位置已记录”的确认，右侧留给「设置」
         var coordText = CreateText(panelObject.transform, "已记录标记位置", 28, false);
@@ -1240,12 +1242,12 @@ public static class SceneBuilder
         coordRect.offsetMin = new Vector2(20f, -54f);
         coordRect.offsetMax = new Vector2(-180f, -14f);
         coordText.alignment = TextAnchor.MiddleLeft;
-        coordText.color = new Color(0.7f, 0.85f, 1f);
+        coordText.color = UiPalette.TextBody;
 
         Button settingsButton = CreateFixedButton(
             panelObject.transform, "设置",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-20f, -14f),
-            new Vector2(140f, 56f), new Color(0.22f, 0.25f, 0.31f, 1f));
+            new Vector2(140f, 56f), UiPalette.BtnIdle);
 
         InputField titleInput = CreateInputField(panelObject.transform, "问题标题（必填）", -66f, 76f);
         InputField descriptionInput = CreateInputField(panelObject.transform, "问题描述（选填）", -150f, 76f);
@@ -1262,7 +1264,7 @@ public static class SceneBuilder
         labelRect.offsetMin = new Vector2(12f, 0f);
         labelRect.offsetMax = Vector2.zero;
         priorityLabel.alignment = TextAnchor.MiddleLeft;
-        priorityLabel.color = new Color(0.78f, 0.84f, 0.92f);
+        priorityLabel.color = UiPalette.TextBody;
 
         Button lowButton = CreateRowButton(priorityRow.transform, "低", 1f, 4f);
         Button mediumButton = CreateRowButton(priorityRow.transform, "中", 2f, 4f);
@@ -1283,8 +1285,8 @@ public static class SceneBuilder
         SetTopStretch(actionRow.GetComponent<RectTransform>(), -394f, 88f);
 
         Button cancelButton = CreateRowButton(actionRow.transform, "取消", 0f, 2f);
-        Button submitButton = CreateRowButton(actionRow.transform, "提交", 1f, 2f);
-        submitButton.image.color = new Color(0.14f, 0.39f, 0.92f, 1f);
+        Button submitButton = CreateRowButton(actionRow.transform, "提交", 1f, 2f, true);
+        submitButton.image.color = UiPalette.BtnPrimary;
 
         var statusText = CreateText(panelObject.transform, string.Empty, 28, false);
         SetTopStretch(statusText.rectTransform, -490f, 54f);
@@ -1405,7 +1407,8 @@ public static class SceneBuilder
         Vector2 anchorMax,
         Vector2 anchoredPosition,
         Vector2 size,
-        Color color)
+        Color color,
+        bool darkText = false)
     {
         var buttonObject = new GameObject(label, typeof(RectTransform));
         buttonObject.transform.SetParent(parent, false);
@@ -1421,12 +1424,13 @@ public static class SceneBuilder
         ApplyRoundedBackground(image, color);
 
         var button = buttonObject.AddComponent<Button>();
-        CreateText(buttonObject.transform, label, 34);
+        Text buttonText = CreateText(buttonObject.transform, label, 34);
+        buttonText.color = darkText ? UiPalette.TextOnLight : UiPalette.TextPrimary;
 
         return button;
     }
 
-    private static Button CreateRowButton(Transform parent, string label, float index, float count)
+    private static Button CreateRowButton(Transform parent, string label, float index, float count, bool darkText = false)
     {
         var buttonObject = new GameObject(label, typeof(RectTransform));
         buttonObject.transform.SetParent(parent, false);
@@ -1439,10 +1443,11 @@ public static class SceneBuilder
         rect.offsetMax = new Vector2(-6f, 0f);
 
         var image = buttonObject.AddComponent<Image>();
-        ApplyRoundedBackground(image, new Color(0.22f, 0.25f, 0.31f, 1f));
+        ApplyRoundedBackground(image, UiPalette.BtnIdle);
 
         var button = buttonObject.AddComponent<Button>();
-        CreateText(buttonObject.transform, label, 30);
+        Text buttonText = CreateText(buttonObject.transform, label, 30);
+        buttonText.color = darkText ? UiPalette.TextOnLight : UiPalette.TextPrimary;
 
         return button;
     }
@@ -1496,7 +1501,7 @@ public static class SceneBuilder
         text.font = ChineseFont();
         text.fontSize = fontSize;
         text.alignment = TextAnchor.MiddleCenter;
-        text.color = Color.white;
+        text.color = UiPalette.TextPrimary;
         text.text = content;
         // 文字不参与点击，按钮靠背景 Image 接收
         text.raycastTarget = false;

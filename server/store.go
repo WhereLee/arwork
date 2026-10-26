@@ -53,7 +53,13 @@ CREATE TABLE IF NOT EXISTS issue_events (
 	created_at  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_issue_events_issue ON issue_events(issue_id, id);`
+CREATE INDEX IF NOT EXISTS idx_issue_events_issue ON issue_events(issue_id, id);
+
+-- 列表按角色分流：巡检员按 reporter、修复者按 assignee 查，管理员全量。
+-- 不建索引的话数据量上去后每次刷新都是全表扫描。
+CREATE INDEX IF NOT EXISTS idx_issues_reporter ON issues(reporter);
+CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee);
+CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);`
 
 // issueColumns 列出一致顺序的字段，避免多处 SELECT 写得不一致。
 const issueColumns = `id, title, description, priority, status, pos_x, pos_y, pos_z, reporter,
@@ -68,6 +74,12 @@ type Store struct {
 func NewStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
+		return nil, err
+	}
+
+	// WAL 模式下读不会被写阻塞，运维做备份时也不会卡住正在用的请求
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
 		return nil, err
 	}
 
@@ -134,6 +146,12 @@ func (s *Store) ensureColumn(table, column, ddl string) error {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// Ping 给健康检查用：能连上数据库才算服务可用，
+// 只看进程还活着会漏掉磁盘满、库文件损坏这类情况。
+func (s *Store) Ping() error {
+	return s.db.Ping()
 }
 
 // Create 写入工单并记一条 created 事件，两步在同一个事务里。

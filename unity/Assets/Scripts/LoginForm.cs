@@ -20,9 +20,9 @@ public class LoginForm : MonoBehaviour
     /// <summary>登录成功后触发。</summary>
     public event System.Action LoggedIn;
 
-    private static readonly Color ErrorColor = new Color(1f, 0.55f, 0.5f);
-    private static readonly Color BusyColor = new Color(0.75f, 0.8f, 0.88f);
-    private static readonly Color SuccessColor = new Color(0.55f, 0.95f, 0.62f);
+    private static readonly Color ErrorColor = UiPalette.Error;
+    private static readonly Color BusyColor = UiPalette.Hint;
+    private static readonly Color SuccessColor = UiPalette.Success;
 
     private bool _busy;
 

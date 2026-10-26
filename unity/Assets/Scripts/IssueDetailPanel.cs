@@ -40,8 +40,8 @@ public class IssueDetailPanel : MonoBehaviour
     /// <summary>动过工单后触发，让列表刷新。</summary>
     public event Action Changed;
 
-    private static readonly Color ErrorColor = new Color(1f, 0.55f, 0.5f);
-    private static readonly Color HintColor = new Color(0.75f, 0.8f, 0.88f);
+    private static readonly Color ErrorColor = UiPalette.Error;
+    private static readonly Color HintColor = UiPalette.Hint;
 
     private IssueSummary _issue;
     private IssueEventItem[] _events;
