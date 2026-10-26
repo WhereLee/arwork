@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// ErrStateConflict 表示当前状态不允许这个动作。
+// handler 据此返回 409，与参数写错的 400 区分开：前者是「工单已经不在这个状态」，
+// 后者是「你传的东西不对」，客户端处理方式不同。
+type ErrStateConflict struct {
+	Message string
+}
+
+func (e ErrStateConflict) Error() string {
+	return e.Message
+}
+
+func stateConflict(message string) error {
+	return ErrStateConflict{Message: message}
+}
+
 // canView 判断这个账号能不能看这条工单。
 // 巡检员看自己报的，修复者看派给自己的（退回后仍能看到），管理员看全部。
 func canView(claims Claims, issue Issue) bool {
@@ -55,7 +70,7 @@ func (a *API) actionDispatch(claims Claims, issue *Issue, req actionRequest, not
 	}
 
 	if issue.Status != StatusOpen && issue.Status != StatusInProgress {
-		return IssueEvent{}, errors.New("只有未处理或处理中的工单可以派单")
+		return IssueEvent{}, stateConflict("只有未处理或处理中的工单可以派单")
 	}
 
 	assignee := strings.TrimSpace(req.Assignee)
@@ -107,7 +122,7 @@ func (a *API) actionReturn(claims Claims, issue *Issue, note string, now time.Ti
 	}
 
 	if issue.Status != StatusInProgress {
-		return IssueEvent{}, errors.New("只有处理中的工单可以退回")
+		return IssueEvent{}, stateConflict("只有处理中的工单可以退回")
 	}
 
 	if note == "" {
@@ -129,7 +144,7 @@ func (a *API) actionSubmit(ctx context.Context, claims Claims, issue *Issue, not
 	}
 
 	if issue.Status != StatusInProgress {
-		return IssueEvent{}, errors.New("只有处理中的工单可以提交")
+		return IssueEvent{}, stateConflict("只有处理中的工单可以提交")
 	}
 
 	if note == "" {
@@ -155,7 +170,7 @@ func (a *API) actionWithdraw(claims Claims, issue *Issue, now time.Time) (IssueE
 	}
 
 	if issue.Status != StatusPendingReview {
-		return IssueEvent{}, errors.New("只有待确认的工单可以撤回")
+		return IssueEvent{}, stateConflict("只有待确认的工单可以撤回")
 	}
 
 	from := issue.Status
@@ -172,7 +187,7 @@ func (a *API) actionApprove(claims Claims, issue *Issue, now time.Time) (IssueEv
 	}
 
 	if issue.Status != StatusPendingReview {
-		return IssueEvent{}, errors.New("只有待确认的工单可以验收")
+		return IssueEvent{}, stateConflict("只有待确认的工单可以验收")
 	}
 
 	from := issue.Status
@@ -189,7 +204,7 @@ func (a *API) actionReject(claims Claims, issue *Issue, note string, now time.Ti
 	}
 
 	if issue.Status != StatusPendingReview {
-		return IssueEvent{}, errors.New("只有待确认的工单可以驳回")
+		return IssueEvent{}, stateConflict("只有待确认的工单可以驳回")
 	}
 
 	if note == "" {
@@ -210,7 +225,7 @@ func (a *API) actionReopen(claims Claims, issue *Issue, note string, now time.Ti
 	}
 
 	if issue.Status != StatusResolved {
-		return IssueEvent{}, errors.New("只有已解决的工单可以重开")
+		return IssueEvent{}, stateConflict("只有已解决的工单可以重开")
 	}
 
 	if note == "" {
@@ -222,7 +237,7 @@ func (a *API) actionReopen(claims Claims, issue *Issue, note string, now time.Ti
 	issue.UpdatedAt = now
 
 	if issue.Assignee == "" {
-		return IssueEvent{}, errors.New("这条工单没有处理人，请先派单")
+		return IssueEvent{}, stateConflict("这条工单没有处理人，请先派单")
 	}
 
 	return newEvent(issue.ID, claims.Username, ActionReopened, from, StatusInProgress, note, now), nil
@@ -235,7 +250,7 @@ func (a *API) actionClose(claims Claims, issue *Issue, note string, now time.Tim
 	}
 
 	if issue.Status != StatusOpen && issue.Status != StatusInProgress {
-		return IssueEvent{}, errors.New("只有未处理或处理中的工单可以关闭")
+		return IssueEvent{}, stateConflict("只有未处理或处理中的工单可以关闭")
 	}
 
 	if note == "" {

@@ -262,9 +262,17 @@ func (a *API) handleAction(w http.ResponseWriter, r *http.Request) {
 	event, err := a.applyAction(r.Context(), claims, &issue, req, now)
 	if err != nil {
 		status := http.StatusBadRequest
+
 		if errors.Is(err, ErrForbidden) || errors.Is(err, ErrNotYours) {
 			status = http.StatusForbidden
+		} else {
+			// 状态不允许这个动作算资源冲突，不是参数错
+			var conflict ErrStateConflict
+			if errors.As(err, &conflict) {
+				status = http.StatusConflict
+			}
 		}
+
 		writeError(w, status, err.Error())
 		return
 	}
