@@ -1120,9 +1120,10 @@ public static class SceneBuilder
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(360f, 40f),
             new Vector2(300f, 100f), new Color(0.5f, 0.28f, 0.28f, 1f));
 
+        // 撤回只会在「待确认」出现，和「完成」互斥，所以放同一个位置
         Button withdrawButton = CreateFixedButton(
             panel.transform, "撤回",
-            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(680f, 40f),
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 40f),
             new Vector2(300f, 100f), new Color(0.3f, 0.32f, 0.38f, 1f));
 
         Text statusMessage = CreateText(panel.transform, string.Empty, 28, false);
