@@ -8,7 +8,7 @@ on:
 
 jobs:
   go:
-    name: Go 后端
+    name: Go 鍚庣
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -18,22 +18,22 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # 版本从 go.mod 读，避免和本地工具链对不上
+          # 鐗堟湰浠?go.mod 璇伙紝閬垮厤鍜屾湰鍦板伐鍏烽摼瀵逛笉涓?
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: 静态检查
+      - name: 闈欐€佹鏌?
         run: go vet ./...
 
-      # 状态机、权限、并发 CAS、AI 降级都在这里跑，不过就别往下走
-      - name: 单元测试
+      # 鐘舵€佹満銆佹潈闄愩€佸苟鍙?CAS銆丄I 闄嶇骇閮藉湪杩欓噷璺戯紝涓嶈繃灏卞埆寰€涓嬭蛋
+      - name: 鍗曞厓娴嬭瘯
         run: go test -count=1 ./...
 
-      - name: 编译
+      - name: 缂栬瘧
         run: go build ./...
 
   web:
-    name: React 管理端
+    name: React 绠＄悊绔?
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,8 +47,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: 安装依赖
+      - name: 瀹夎渚濊禆
         run: npm ci
 
-      - name: 类型检查并构建
+      # 任务书 3.2 第 4 条（后端不可用不能白屏）就在这三条用例里
+      - name: 单元测试
+        run: npm test
+
+      - name: 绫诲瀷妫€鏌ュ苟鏋勫缓
         run: npm run build
