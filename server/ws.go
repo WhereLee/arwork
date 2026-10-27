@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -93,7 +94,9 @@ type wsClient struct {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// 只允许同源：前端经 nginx 代理过来，Origin 和 Host 是一致的。
+	// 只允许同源：前端经 nginx 代理过来，Origin 和 Host 应该指向同一台主机。
+	// 只比主机名不比端口：nginx 的 proxy_set_header Host $host 不带端口，
+	// 而浏览器的 Origin 带着 :9400，直接比 Host 会永远不相等。
 	// 非浏览器客户端（curl、测试）不带 Origin，这里放行。
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -106,7 +109,12 @@ var upgrader = websocket.Upgrader{
 			return false
 		}
 
-		return parsed.Host == r.Host
+		requestHost := r.Host
+		if host, _, err := net.SplitHostPort(requestHost); err == nil {
+			requestHost = host
+		}
+
+		return parsed.Hostname() == requestHost
 	},
 }
 
