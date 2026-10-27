@@ -1,0 +1,50 @@
+name: arwork
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: arwork-api:latest
+    restart: unless-stopped
+
+    # 密钥只从 .env 读，不进镜像也不进 git
+    env_file:
+      - .env
+
+    volumes:
+      # SQLite 放命名卷，容器重建数据还在
+      - arwork-data:/app/data
+
+    # 不给 ports：只有 web 容器需要对外，api 走 compose 内部网络
+    expose:
+      - "8080"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: arwork-web:latest
+    restart: unless-stopped
+
+    # 9400 是安全组单独放行的端口，只映射这一个
+    ports:
+      - "0.0.0.0:9400:80"
+
+    depends_on:
+      - api
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  arwork-data:

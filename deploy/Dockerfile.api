@@ -1,0 +1,26 @@
+# 运行时镜像。二进制在本地或 CI 交叉编译好再 COPY 进来，
+# 不在镜像里编译：服务器下行只有 3Mbps，拉 golang 基础镜像要七分钟，
+# 而 COPY 一个 15MB 的二进制是秒级的。
+FROM alpine:3.20
+
+# ca-certificates 调 DeepSeek HTTPS 要用，tzdata 让日志时间是本地时间。
+# 先换国内源：服务器拉 dl-cdn.alpinelinux.org 经常卡住，换成阿里云镜像后秒完成。
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata \
+    && addgroup -S app && adduser -S app -G app
+
+WORKDIR /app
+
+COPY arwork-server /app/arwork-server
+RUN chmod +x /app/arwork-server && mkdir -p /app/data && chown -R app:app /app
+
+# 不用 root 跑：容器里只读和执行，不需要特权
+USER app
+
+ENV ADDR=":8080" \
+    DB_PATH="/app/data/issues.db" \
+    TZ="Asia/Shanghai"
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/arwork-server"]
