@@ -26,6 +26,9 @@ public class LoginForm : MonoBehaviour
 
     private bool _busy;
 
+    /// <summary>上次用过的服务器地址，换网络或切 4G 时不用重新输。</summary>
+    private const string ServerKey = "ar.server.url";
+
     private void Awake()
     {
         if (loginButton != null)
@@ -43,6 +46,15 @@ public class LoginForm : MonoBehaviour
     public void Show()
     {
         _busy = false;
+
+        if (serverInput != null)
+        {
+            string saved = PlayerPrefs.GetString(ServerKey, string.Empty);
+            if (!string.IsNullOrEmpty(saved))
+            {
+                serverInput.text = saved;
+            }
+        }
 
         if (passwordInput != null)
         {
@@ -116,6 +128,8 @@ public class LoginForm : MonoBehaviour
         }
 
         Session.Save(response);
+        PlayerPrefs.SetString(ServerKey, baseUrl);
+        PlayerPrefs.Save();
         SetStatus("登录成功", SuccessColor);
 
         Debug.Log("[AR] 登录成功：" + response.username + "（" + response.role + "）");

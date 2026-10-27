@@ -121,8 +121,11 @@ public class IssueCollection
 /// </summary>
 public static class ApiClient
 {
-    /// <summary>电脑在局域网里的地址，手机与电脑需处于同一网络。</summary>
-    public const string DefaultBaseUrl = "http://192.168.1.5:8080";
+    /// <summary>
+    /// 默认后端地址。走公网服务器，前端由 nginx 反代到 Go 服务，
+    /// 所以路径要带 /api 前缀。局域网调试时在登录页手填地址即可覆盖。
+    /// </summary>
+    public const string DefaultBaseUrl = "http://124.223.36.154:9400/api";
 
     /// <summary>
     /// 最近一次使用的地址。在登录页或表单里改过服务器地址后，
@@ -156,7 +159,7 @@ public static class ApiClient
 
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                onError("连不上服务器，请检查网络，或确认服务器地址是否正确");
                 yield break;
             }
 
@@ -197,7 +200,7 @@ public static class ApiClient
 
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                onError("连不上服务器，请检查网络，或确认服务器地址是否正确");
                 yield break;
             }
 
@@ -240,7 +243,7 @@ public static class ApiClient
 
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                onError("连不上服务器，请检查网络，或确认服务器地址是否正确");
                 yield break;
             }
 
@@ -298,7 +301,7 @@ public static class ApiClient
 
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                onError("连不上服务器，请确认手机与电脑在同一 WiFi");
+                onError("连不上服务器，请检查网络，或确认服务器地址是否正确");
                 yield break;
             }
 
@@ -359,7 +362,7 @@ public static class ApiClient
 
             if (request.result == UnityWebRequest.Result.ConnectionError)
             {
-                onError("连不上服务器，请确认手机与电脑在同一 WiFi，且后端已启动");
+                onError("连不上服务器，请检查网络，或确认服务器地址是否正确，且后端已启动");
                 yield break;
             }
 
@@ -410,7 +413,7 @@ public static class ApiClient
         switch (request.responseCode)
         {
             case 0:
-                return "连不上服务器，请确认手机与电脑在同一 WiFi";
+                return "连不上服务器，请检查网络，或确认服务器地址是否正确";
             case 400:
                 return "提交的内容不符合要求，请检查标题和优先级";
             case 401:
