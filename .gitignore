@@ -26,6 +26,8 @@
 *.opendb
 *.VC.db
 *.apk
+# 交付用的安装包放在 docs 下，要跟仓库一起交
+!docs/*.apk
 *.aab
 *.unitypackage
 *.app
