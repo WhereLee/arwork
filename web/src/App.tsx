@@ -18,6 +18,7 @@ import { formatPosition, formatTime } from './format';
 import IssueDrawer from './IssueDrawer';
 import LoginPage from './LoginPage';
 import UsersPage from './UsersPage';
+import { useLiveUpdates } from './useLiveUpdates';
 import {
   CATEGORY_LABEL,
   PRIORITY_LABEL,
@@ -90,6 +91,11 @@ function IssuesTab({ isAdmin, session, onLogout }: IssuesTabProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 别人改了工单就重拉列表。后端只推「变了」，这里按自己权限重新拿。
+  const liveStatus = useLiveUpdates(session.token, () => {
+    void load();
+  });
 
   const pendingCount = useMemo(
     () => issues.filter((i) => i.status === 'open').length,
@@ -261,7 +267,12 @@ function IssuesTab({ isAdmin, session, onLogout }: IssuesTabProps) {
         onChanged={() => void load()}
       />
 
-      <footer className="page-footer">手机端 Unity AR · Go 后端 · React 管理端 —— 同一份数据</footer>
+      <footer className="page-footer">
+        <span className={`live-badge live-${liveStatus}`}>
+          {liveStatus === 'live' ? '实时' : liveStatus === 'connecting' ? '连接中' : '已断开'}
+        </span>
+        {' · '}手机端 Unity AR · Go 后端 · React 管理端 —— 同一份数据
+      </footer>
     </>
   );
 }

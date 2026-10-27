@@ -34,7 +34,7 @@ func main() {
 		log.Fatalf("初始化账号失败: %v", err)
 	}
 
-	api := &API{store: store, ai: LoadAIConfig()}
+	api := &API{store: store, ai: LoadAIConfig(), hub: NewHub()}
 	server := &http.Server{Addr: addr, Handler: api.Routes()}
 
 	log.Printf("巡检问题服务已启动 http://localhost%s （数据库 %s，AI 分诊 %s）",

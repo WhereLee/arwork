@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,12 +16,16 @@ import (
 type API struct {
 	store *Store
 	ai    AIConfig
+	hub   *Hub
 }
 
 func (a *API) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", a.handleHealth)
 	mux.HandleFunc("POST /login", a.handleLogin)
+
+	// WebSocket 自己校验 token（浏览器不能给 ws 塞自定义头），所以不走 requireRole
+	mux.HandleFunc("GET /ws", a.handleWS)
 
 	// 巡检员能上报、能看自己报的；只有管理员能处置状态。
 	mux.HandleFunc("POST /issues",
@@ -167,6 +173,9 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		log.Printf("写回派单结果时工单已被改动: %s", issue.ID)
 	}
 
+	// 工单已经落库，通知在线客户端刷新（AI 派单结果也算在这条里）
+	a.hub.Publish(issue.ID)
+
 	writeJSON(w, http.StatusCreated, issue)
 }
 
@@ -306,6 +315,9 @@ func (a *API) handleAction(w http.ResponseWriter, r *http.Request) {
 		events = []IssueEvent{event}
 	}
 
+	// 流转成功，通知所有人刷新（网页端会立即看到新状态）
+	a.hub.Publish(id)
+
 	writeJSON(w, http.StatusOK, detailResponse{Issue: issue, Events: events})
 }
 
@@ -369,6 +381,8 @@ func (a *API) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.hub.Publish(issue.ID)
+
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -416,6 +430,25 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack 必需：WebSocket 升级要把底层 TCP 连接抢过去自己管。
+// 中间件包一层 ResponseWriter 后这个方法不会自动继承，
+// 漏了它握手就会报 does not implement http.Hijacker。
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("底层连接不支持 Hijack")
+	}
+
+	return hijacker.Hijack()
+}
+
+// Flush 让包装后的连接仍然能即时推送（以后上流式响应靠它）。
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // withCORS 放行浏览器跨域，React 管理端才能直接访问后端。
