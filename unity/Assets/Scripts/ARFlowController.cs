@@ -49,6 +49,7 @@ public class ARFlowController : MonoBehaviour
     public Button confirmYesButton;
     public Button confirmNoButton;
     public Button openListButton;
+    public Button logoutButton;
     public Text accountText;
 
     /// <summary>屏幕中心指着的那块平面，提亮显示。</summary>
@@ -111,6 +112,11 @@ public class ARFlowController : MonoBehaviour
         if (openListButton != null)
         {
             openListButton.onClick.AddListener(OpenList);
+        }
+
+        if (logoutButton != null)
+        {
+            logoutButton.onClick.AddListener(Logout);
         }
 
         if (loginForm != null)
@@ -488,6 +494,17 @@ public class ARFlowController : MonoBehaviour
     {
         Session.Clear();
         SetMode(Mode.Login);
+    }
+
+    /// <summary>
+    /// 主动退出：清掉本地 token 回登录页。
+    /// 不弹确认——退出代价只是重新输一次账号，多一次点击反而碍事。
+    /// </summary>
+    public void Logout()
+    {
+        Session.Clear();
+        SetMode(Mode.Login);
+        Debug.Log("[AR] 已退出登录");
     }
 
     private void RefreshSwitchButtons()

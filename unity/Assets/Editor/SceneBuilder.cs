@@ -31,6 +31,7 @@ public static class SceneBuilder
         public GameObject guidePanel;
         public Text accountText;
         public Button openListButton;
+        public Button logoutButton;
         public Button horizontalButton;
         public Button verticalButton;
 
@@ -601,6 +602,7 @@ public static class SceneBuilder
         flow.confirmYesButton = ui.confirmYesButton;
         flow.confirmNoButton = ui.confirmNoButton;
         flow.openListButton = ui.openListButton;
+        flow.logoutButton = ui.logoutButton;
         flow.accountText = ui.accountText;
         flow.loginForm = ui.loginForm;
         flow.listPanel = ui.listPanel;
@@ -674,6 +676,13 @@ public static class SceneBuilder
             panel.transform, "我的上报",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-40f, -36f),
             new Vector2(240f, 84f), UiPalette.BtnIdle);
+
+        // 放在「我的上报」左边。演示时要能在巡检员和修复者之间切账号，
+        // 没这个入口就只能去系统设置里清 App 数据。
+        refs.logoutButton = CreateFixedButton(
+            panel.transform, "退出",
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-300f, -36f),
+            new Vector2(160f, 84f), UiPalette.BtnIdle);
 
         Text title = CreateText(panel.transform, "园区巡检 AR", 56, false);
         SetTopStretch(title.rectTransform, -240f, 120f);
